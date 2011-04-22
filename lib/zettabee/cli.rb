@@ -90,11 +90,11 @@ module ZettaBee
         if @destination then
           zfsr = @zfsrs[@destination]
           zfsr.execute(@action.to_sym)
-          Utilities.send_nsca(zfsr.dhost,"#{ME}:",0,"#{zfsr.shost}:#{zfsr.szfs} #{@action.to_s.upcase} #{zfsr.dhost}:#{zfsr.dzfs}",@options.nagios) if @options.nagios
+          Utilities.send_nsca(zfsr.dhost,"#{ME}:#{zfsr.port}",0,"#{zfsr.shost}:#{zfsr.szfs} #{@action.to_s.upcase} #{zfsr.dhost}:#{zfsr.dzfs}",@options.nagios) if @options.nagios
         else
           @zfsrs.each_value do |zfsr|
             zfsr.execute(@action.to_sym)
-            Utilities.send_nsca(zfsr.dhost,"#{ME}:",0,"#{zfsr.shost}:#{zfsr.szfs} #{@action.to_s.upcase} #{zfsr.dhost}:#{zfsr.dzfs}",@options.nagios) if @options.nagios
+            Utilities.send_nsca(zfsr.dhost,"#{ME}:#{zfsr.port}",0,"#{zfsr.shost}:#{zfsr.szfs} #{@action.to_s.upcase} #{zfsr.dhost}:#{zfsr.dzfs}",@options.nagios) if @options.nagios
           end
         end
       end

@@ -28,6 +28,10 @@ module ZettaBee
     LASTSNAP_ZFSP = "#{ZFIX}:lastsnap"
     SOURCEFS_ZFSP = "#{ZFIX}:sourcefs"
     DESTINFS_ZFSP = "#{ZFIX}:destinfs"
+    CREATION_ZFSP = "creation"
+
+    class Error < StandardError; end
+    class SSHError < Error; end
 
     def ZettaBee.readconfig()
       begin
@@ -81,15 +85,15 @@ module ZettaBee
     def status
       # need to detect when state is inconsistent: for instance, if the zfsrem property exists but no
       # snapshots exist, and the like
-      lsnap = lsnapsync
-      lsnap_creation = getzfsproperty("creation","#{@dzfs}@#{lsnap}")
+      lastsnapshot = getzfsproperty(@dzfs,LASTSNAP_ZFSP)
+      lastsnapshot_creation = getzfsproperty("#{@dzfs}@#{lastsnapshot}","creation")
 
-      if lsnap_creation then
+      if lastsnapshot_creation then
         is_running? ? remstatus = "Running" : remstatus = "Idle"
         remstate = "Synchronized"
 
-        hours,minutes,seconds,frac = Date.day_fraction_to_time(DateTime.now() - DateTime.parse(lsnap_creation))
-        Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d  %s:%d  %s",@shost.ljust(8),@szfs.ljust(38),@dhost.rjust(8),@dzfs.ljust(36),remstate.ljust(14),hours,minutes,seconds,lsnap.rjust(24),@port,remstatus)
+        hours,minutes,seconds,frac = Date.day_fraction_to_time(DateTime.now() - DateTime.parse(lastsnapshot_creation))
+        Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d  %s:%d  %s",@shost.ljust(8),@szfs.ljust(38),@dhost.rjust(8),@dzfs.ljust(36),remstate.ljust(14),hours,minutes,seconds,lastsnapshot.rjust(24),@port,remstatus)
       else
         is_running? ? remstatus = "Initalizing" : remstatus = "Uninitialized"
         remstate = "Uninitialized"
@@ -98,7 +102,7 @@ module ZettaBee
     end
 
     def is_running?
-      File.exists?("/local/var/run/#{ZFIX}/#{@port}") ? true : false
+      File.exists?(@zmqsock) ? true : false
     end
 
     def runstatus(interval=0)
@@ -138,32 +142,59 @@ module ZettaBee
       # create configuration directory and empty configuration file
     end
 
-    def getzfsproperty(zfsproperty,zfsfs=@dzfs)
-      value = nil
+    def zfsproperty(action,zfsfs,property,value=nil,session=nil)
+      zfspropval = nil
+      zfscommand = case action
+        when :get then "zfs get -H -o value #{property} #{zfsfs}"
+        when :set then "zfs set #{property}=#{value} #{zfsfs}"
+        else nil
+      end
+
       begin
-        pstatus = popen4("zfs get -H -o value #{zfsproperty} #{zfsfs}") do |pid, pstdin, pstdout, pstderr|
-          out = pstdout.read.strip
-          value = out unless out == '-'
+        if session.nil?
+          pstatus = popen4(zfscommand) do |pid, pstdin, pstdout, pstderr|
+            out = pstdout.read.strip
+            zfspropval = out unless out == '-'
+          end
+          pstatus.exitstatus == 0 ? zfspropval : nil
+        else
+          ec = nil
+          sessionchannel = session.open_channel do |channel|
+            channel.exec zfscommand do |ch,chs|
+              if chs
+                channel.on_request "exit-status" do |ch, data|
+                  ec = data.read_long
+                end
+                channel.on_extended_data do |ch,data|
+                  zfspropval = data
+                end
+              else
+                raise SSHError "could not open SSH channel"
+              end
+            end
+          end
+          sessionchannel.wait
+          ec == 0 ? zfspropval : nil
         end
       end
-      pstatus.exitstatus == 0 ? value : nil
     end
 
-    def setzfsproperty(zfsproperty,value,zfsfs=@dzfs)
-      begin
-        pstatus = popen4("zfs set #{zfsproperty}=#{value} #{zfsfs}") do |pid, pstdin, pstdout, pstderr|
-        end
-      end
+    def setzfsproperty(zfsfs,key,value,session=nil)
+      zfsproperty(:set,zfsfs,key,value,session)
+    end
+
+    def getzfsproperty(zfsfs,key,session=nil)
+      zfsproperty(:get,zfsfs,key,session)
     end
 
     def lsnapsync=(snapshot)
       begin
-        setzfsproperty(LASTSNAP_ZFSP,snapshot)
+        setzfsproperty(@dzfs,LASTSNAP_ZFSP,snapshot)
       end
     end
 
     def lsnapsync
-      getzfsproperty(LASTSNAP_ZFSP)
+      getzfsproperty(@dzfs,LASTSNAP_ZFSP)
     end
 
     def statuszocket
@@ -215,25 +246,25 @@ module ZettaBee
       @log.add Log4r::FileOutputter.new("logfile", :filename => @logfile, :trunc => false, :formatter => Log4r::PatternFormatter.new(:pattern => "[%d] #{ZFIX}:%c [%p] %l %m"), :level => log4level)
       @log.add Log4r::StdoutOutputter.new('console', :formatter => Log4r::PatternFormatter.new(:pattern => "[%d] #{ZFIX}:%c [%p] %l %m"), :level => Log4r::DEBUG) if ZettaBee.verbose
 
-      nextsnapshot = "#{ZFIX}.#{Time.new.strftime('%Y%m%d%H%m%S%Z')}"
-      lastsnapshot = lsnapsync
+      nextsnapshot = "#{ZFIX}.#{Time.new.strftime('%Y%m%d%H%M%S%Z')}"
+      lastsnapshot = getzfsproperty(@dzfs,LASTSNAP_ZFSP)
 
       @log.info "#{@shost}:#{@szfs}@#{nextsnapshot} #{mode.to_s.upcase} #{@dhost}:#{@dzfs} START"
 
       case mode
         when :initialize then
-          abort "error: cannot initialize: #{@dzfs} already exists" if getzfsproperty("creation",@dzfs)
+          abort "error: cannot initialize: #{@dzfs} already exists" if getzfsproperty(@dzfs,CREATION_ZFSP)
           # check destination parent!
           zfssend_opts = ""
           zfsrecv_opts = "-o #{SOURCEFS_ZFSP}='#{@shost}:#{@szfs}' -o #{DESTINFS_ZFSP}='#{@dhost}:#{@dzfs}'"
         when :update then
-          abort "error: cannot update: #{@dzfs} does not exists" unless getzfsproperty("creation",@dzfs)
-          abort "error: cannot update: cannot determine #{@dzfs}:#{LSNAPSYNC} property" unless lastsnapshot
+          abort "error: cannot update: #{@dzfs} does not exists" unless getzfsproperty(@dzfs,CREATION_ZFSP)
+          abort "error: cannot update: cannot determine #{@dzfs}:#{LASTSNAP_ZFSP} property" unless lastsnapshot
           zfssend_opts = "-i #{lastsnapshot}"
         else
           abort "invalid mode"
       end
-      @log.debug " mode: #{mode.to_s}; zfs send options: '#{zfssend_opts}'"
+      @log.debug " mode: #{mode.to_s}; zfs send options: '#{zfssend_opts}'; zfs recv options: '#{zfsrecv_opts}'"
 
       Net::SSH.start(@shost,'root',:port => @sshport,:keys => [ @sshkey ]) do |session|
 
@@ -247,7 +278,7 @@ module ZettaBee
           channel.exec "zfs snapshot #{@szfs}@#{nextsnapshot}" do |ch,chs|
             @log.debug "  channel.exec(zfs snapshot #{@szfs}@#{nextsnapshot})"
             if chs
-              @log.debug(" creating #{@shost}:#{@szfs}@#{nextsnapshot} snapshot")
+              @log.debug("  creating #{@shost}:#{@szfs}@#{nextsnapshot} snapshot")
               channel.on_request "exit-status" do |ch, data|
                 ec = data.read_long
                 @log.debug "   exit-status received: #{ec}"
@@ -256,7 +287,7 @@ module ZettaBee
                 eo = data
               end
               channel.on_close do |ch|
-                @log.debug "   channel closed"
+                @log.debug "  channel closed"
               end
             else
               abort "could not open channel to create remote snapshot #{@shost}:#{@szfs}@#{nextsnapshot}"
@@ -303,7 +334,8 @@ module ZettaBee
            sessionchannel.wait
 
            abort "failed to zfs send #{@shost}:#{@szfs}@#{nextsnapshot}: #{stderr.readlines()}" unless ec == 0
-           self.lsnapsync = nextsnapshot
+           setzfsproperty(@dzfs,LASTSNAP_ZFSP,nextsnapshot)
+           setzfsproperty(@szfs,LASTSNAP_ZFSP,nextsnapshot,session)
 
            if mode == :update
 
