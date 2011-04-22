@@ -88,9 +88,22 @@ module ZettaBee
         @zfsrs = ZettaBee.readconfig()
 
         if @destination then
-          zfsr = @zfsrs[@destination]
-          zfsr.execute(@action.to_sym)
-          Utilities.send_nsca(zfsr.dhost,"#{ME}:#{zfsr.port}",0,"#{zfsr.shost}:#{zfsr.szfs} #{@action.to_s.upcase} #{zfsr.dhost}:#{zfsr.dzfs}",@options.nagios) if @options.nagios
+          zfsr = nil
+          if @destination.split('/').length > 1
+            zfsr = @zfsrs[@destination]
+          elsif @destination.split('/').length == 1
+            @zfsrs.each_key do |key|
+              if key.split('/')[-1] == @destination
+                zfsr = @zfsrs[key]
+              end
+            end
+          end
+          if zfsr.nil?
+            abort "error: invalid destination: #{@destination}"
+          else
+            zfsr.execute(@action.to_sym)
+            Utilities.send_nsca(zfsr.dhost,"#{ME}:#{zfsr.port}",0,"#{zfsr.shost}:#{zfsr.szfs} #{@action.to_s.upcase} #{zfsr.dhost}:#{zfsr.dzfs}",@options.nagios) if @options.nagios
+          end
         else
           @zfsrs.each_value do |zfsr|
             zfsr.execute(@action.to_sym)
