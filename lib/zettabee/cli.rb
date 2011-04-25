@@ -105,9 +105,14 @@ module ZettaBee
             Utilities.send_nsca(zfsr.dhost,"#{ME}:#{zfsr.port}",0,"#{zfsr.shost}:#{zfsr.szfs} #{@action.to_s.upcase} #{zfsr.dhost}:#{zfsr.dzfs}",@options.nagios) if @options.nagios
           end
         else
-          @zfsrs.each_value do |zfsr|
-            zfsr.execute(@action.to_sym)
-            Utilities.send_nsca(zfsr.dhost,"#{ME}:#{zfsr.port}",0,"#{zfsr.shost}:#{zfsr.szfs} #{@action.to_s.upcase} #{zfsr.dhost}:#{zfsr.dzfs}",@options.nagios) if @options.nagios
+          if @action == "status"
+            @zfsrs.each_value do |zfsr|
+              zfsr.execute(@action.to_sym)
+              Utilities.send_nsca(zfsr.dhost,"#{ME}:#{zfsr.port}",0,"#{zfsr.shost}:#{zfsr.szfs} #{@action.to_s.upcase} #{zfsr.dhost}:#{zfsr.dzfs}",@options.nagios) if @options.nagios
+
+            end
+          else
+            abort "error: only status action can be run against all destinations"
           end
         end
       end
