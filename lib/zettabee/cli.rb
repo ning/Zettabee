@@ -10,6 +10,11 @@ module ZettaBee
 
     ME = "zettabee"
 
+    NAGIOS_OK = 0
+    NAGIOS_WARNING = 1
+    NAGIOS_CRITICAL = 2
+    NAGIOS_UNKNOWN = 3
+
     attr_reader :options
 
     def initialize(arguments)
@@ -110,8 +115,17 @@ module ZettaBee
         end
 
         execzfsrs.each do |zfrs|
-          zfrs.execute(@action.to_sym)
-          Utilities.send_nsca(zfsr.dhost,"#{ME}:#{zfsr.port}",0,"#{zfsr.shost}:#{zfsr.szfs} #{@action.to_s.upcase} #{zfsr.dhost}:#{zfsr.dzfs}",@options.nagios) if @options.nagios
+          begin
+            zfrs.execute(@action.to_sym)
+          rescue ZettaBee::IsRunningInfo
+            zfrs.execute(:status)
+            exit 0
+          rescue => e
+            $stderr.write "#{ME}: error: #{@action.to_s.upcase} #{zfrs.dhost}:#{zfrs.dzfs}: #{e.message}\n"
+            Utilities.send_nsca(zfsr.dhost,"#{ME}:#{zfsr.port}",NAGIOS_CRITICAL,"#{@action.to_s.upcase} #{zfrs.dhost}:#{zfrs.dzfs}: #{e.message}",@options.nagios) if @options.nagios
+            exit 3
+          end
+          Utilities.send_nsca(zfsr.dhost,"#{ME}:#{zfsr.port}",0,"#{@action.to_s.upcase} #{zfrs.dhost}:#{zfrs.dzfs}: OK",@options.nagios) if @options.nagios
         end
 
       end

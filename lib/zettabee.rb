@@ -10,6 +10,7 @@ require 'date'
 require 'zmq'
 require 'log4r'
 require 'yaml'
+require 'fileutils'
 
 module ZettaBee
 
@@ -35,7 +36,13 @@ module ZettaBee
 
     class Error < StandardError; end
     class SSHError < Error; end
+    class ZFSError < Error; end
     class ConfigurationError < Error; end
+    class LockError < Error; end
+    class StateError < Error; end
+
+    class Info < StandardError; end
+    class IsRunningInfo < Info; end
 
     def ZettaBee.readconfig()
       begin
@@ -71,6 +78,7 @@ module ZettaBee
       @sshkey = cfgoptions['sshkey']
       @logfile = "/local/var/log/#{ZFIX}/#{@port}.log"
       @zmqsock = "/local/var/run/#{ZFIX}/#{@port}.zmq"
+      @lckfile = "/local/var/run/#{ZFIX}/#{@port}.lck"
 
       @log = Log4r::Logger.new(@port)
     end
@@ -83,12 +91,42 @@ module ZettaBee
         when :initialize then run(:initialize)
         when :update  then run(:update)
         when :setup then setup
+        when :unlock then unlock
         else $stderr.write "error: unknown action #{action}\n"
       end
     end
 
     def output_status
       print Kernel.sprintf("%s:%s  %s:%s  %s  %s  %s:%d  %s\n",@shost.ljust(8),@szfs.ljust(45),@dhost.rjust(8),@dzfs.ljust(36),state.ljust(14),lag,lastsnapshot.rjust(26),@port,status)
+    end
+
+    def lock
+      begin
+        FileUtils.mkdir(@lckfile)
+        true
+      rescue Errno::EEXIST => e
+        if is_running? then
+          raise IsRunningInfo
+        else
+          raise LockError, "#{@dzfs}:#{@port} lock file exists, but no transfer appears to be running"
+        end
+      end
+    end
+
+    def unlock
+      if is_running? then
+        raise IsRunningInfo
+      else
+        begin
+          FileUtils.rmdir(@lckfile)
+        rescue Errno::ENOENT
+          true
+        end
+      end
+    end
+    
+    def is_locked?
+      File.exists?(@lckfile) ? true : false
     end
 
     def is_running?
@@ -275,6 +313,8 @@ module ZettaBee
 
     def run(mode)
 
+      lock
+
       ctx = ZMQ::Context.new()
       skt = ctx.socket(ZMQ::PUB)
       skt.bind statuszocket
@@ -289,16 +329,16 @@ module ZettaBee
 
       case mode
         when :initialize then
-          abort "error: cannot initialize: #{@dzfs} already exists" if getzfsproperty(@dzfs,CREATION_ZFSP)
+          raise StateError "cannot initialize: #{@dzfs} already exists" if getzfsproperty(@dzfs,CREATION_ZFSP)
           # check destination parent!
           zfssend_opts = ""
           zfsrecv_opts = "-o #{SOURCEFS_ZFSP}='#{@shost}:#{@szfs}' -o #{DESTINFS_ZFSP}='#{@dhost}:#{@dzfs}'"
         when :update then
-          abort "error: cannot update: #{@dzfs} does not exists" unless getzfsproperty(@dzfs,CREATION_ZFSP)
-          abort "error: cannot update: cannot determine #{@dzfs}:#{LASTSNAP_ZFSP} property" unless lastsnapshot
+          raise StateError "cannot update: #{@dzfs} does not exists" unless getzfsproperty(@dzfs,CREATION_ZFSP)
+          raise StateError "error: cannot update: cannot determine #{@dzfs}:#{LASTSNAP_ZFSP} property" unless lastsnapshot
           zfssend_opts = "-i #{lastsnapshot}"
         else
-          abort "invalid mode"
+          raise Error "invalid mode"
       end
       @log.debug " mode: #{mode.to_s}; zfs send options: '#{zfssend_opts}'; zfs recv options: '#{zfsrecv_opts}'"
 
@@ -326,92 +366,94 @@ module ZettaBee
                 @log.debug "  channel closed"
               end
             else
-              abort "could not open channel to create remote snapshot #{@shost}:#{@szfs}@#{nextsnapshot}"
+              raise SSHError "unable to open SSH channel to #{@shost} to create snapshot #{nextsnapshot}"
             end
           end
         end
         sessionchannel.wait
 
-        abort "failed to create remote snapshot #{@shost}:#{@szfs}@#{nextsnapshot}: #{eo}" unless ec == 0
+        raise ZFSError "unable to create remote snapshot #{@shost}:#{@szfs}@#{nextsnapshot}: #{eo}" unless ec == 0
         @log.debug " successfully created remote snapshot #{@shost}:#{@szfs}@#{nextsnapshot}"
         ec = nil
         eo = nil
 
 #        begin
 
-           pid, stdin, stdout, stderr = popen4("mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@dzfs}")
-           @log.debug " launched 'mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@dzfs}' [pid #{pid}]"
+          pid, stdin, stdout, stderr = popen4("mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@dzfs}")
+          @log.debug " launched 'mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@dzfs}' [pid #{pid}]"
 
           sleep(30) # this sleep is intended to let zfs recv get ready
 
-           sessionchannel = session.open_channel do |channel|
-             @log.debug " starting SSH session channel to #{@shost}"
-             channel.exec "zfs send #{zfssend_opts} #{@szfs}@#{nextsnapshot} | mbuffer -s 128k -m 500M -R 50M -O #{@dhost}:#{@port}" do |ch,chs|
-               @log.debug "  channel.exec(zfs send #{zfssend_opts} #{@szfs}@#{nextsnapshot} | mbuffer -s 128k -m 500M -R 50M -O #{@dhost}:#{@port})"
-               if chs
-                 @log.debug " sending #{@szfs}@#{nextsnapshot}"
-                 channel.on_request "exit-status" do |ch, data|
-                   ec = data.read_long
-                 end
-                 channel.on_data do |ch, data|
-                   skt.send data
-                 end
-                 channel.on_extended_data do |ch, type, data|
-                   skt.send data
-                 end
-                 channel.on_close do |ch|
-                 end
-               else
-                  Process.kill(:TERM,pid)
-                  skt.close
-                  ctx.close
-                  abort "failed to open channel to zfs send #{@shost}:#{@szfs}@#{nextsnapshot}"
-               end
-             end
-           end
-           sessionchannel.wait
+          sessionchannel = session.open_channel do |channel|
+            @log.debug " starting SSH session channel to #{@shost}"
+            channel.exec "zfs send #{zfssend_opts} #{@szfs}@#{nextsnapshot} | mbuffer -s 128k -m 500M -R 50M -O #{@dhost}:#{@port}" do |ch,chs|
+              @log.debug "  channel.exec(zfs send #{zfssend_opts} #{@szfs}@#{nextsnapshot} | mbuffer -s 128k -m 500M -R 50M -O #{@dhost}:#{@port})"
+              if chs
+                @log.debug " sending #{@szfs}@#{nextsnapshot}"
+                channel.on_request "exit-status" do |ch, data|
+                 ec = data.read_long
+                end
+                channel.on_data do |ch, data|
+                  skt.send data
+                end
+                channel.on_extended_data do |ch, type, data|
+                  skt.send data
+                end
+                channel.on_close do |ch|
+                end
+              else
+                Process.kill(:TERM,pid)
+                skt.close
+                ctx.close
+                raise SSHError "unable to open channel to zfs send #{@shost}:#{@szfs}@#{nextsnapshot}"
+              end
+            end
+          end
+          sessionchannel.wait
 
-           abort "failed to zfs send #{@shost}:#{@szfs}@#{nextsnapshot}: #{stderr.readlines()}" unless ec == 0
-           setzfsproperty(@dzfs,LASTSNAP_ZFSP,nextsnapshot)
-           setzfsproperty(@szfs,LASTSNAP_ZFSP,nextsnapshot,session)
+          raise ZFSError "failed to zfs send #{@shost}:#{@szfs}@#{nextsnapshot}: #{stderr.readlines()}" unless ec == 0
+          setzfsproperty(@dzfs,LASTSNAP_ZFSP,nextsnapshot)
+          setzfsproperty(@szfs,LASTSNAP_ZFSP,nextsnapshot,session)
 
-           if mode == :update
+          if mode == :update
 
-             sessionchannel = session.open_channel do |channel|
-               @log.debug " starting SSH session channel to #{@shost}"
-               channel.exec "zfs destroy #{@szfs}@#{lastsnapshot}" do |ch,chs|
-                 if chs
-                   @log.debug(" destroying #{@shost}:#{@szfs}@#{lastsnapshot} snapshot")
-                   channel.on_request "exit-status" do |ch, data|
-                     ec = data.read_long
-                   end
-                   channel.on_extended_data do |ch,data|
-                     eo = data
-                   end
-                 else
-                   abort "could not open channel to destroy remote snapshot #{@shost}:#{@szfs}@#{lastsnapshot}"
-                 end
-               end
-             end
-             sessionchannel.wait
+            sessionchannel = session.open_channel do |channel|
+              @log.debug " starting SSH session channel to #{@shost}"
+              channel.exec "zfs destroy #{@szfs}@#{lastsnapshot}" do |ch,chs|
+                if chs
+                  @log.debug(" destroying #{@shost}:#{@szfs}@#{lastsnapshot} snapshot")
+                  channel.on_request "exit-status" do |ch, data|
+                    ec = data.read_long
+                  end
+                  channel.on_extended_data do |ch,data|
+                   eo = data
+                  end
+                else
+                  raise SSHError "unable to open SSH channel to #{@shost} to destroy snapshot #{lastsnapshot}"
+                end
+              end
+            end
+            sessionchannel.wait
 
-             sleep(30) # this sleep is intended to let zfs recv wrap up its work _after_ the transfer is done
+            sleep(30) # this sleep is intended to let zfs recv wrap up its work _after_ the transfer is done
 
-             pstatus = popen4("zfs destroy #{@dzfs}@#{lastsnapshot}") do |pid, pstdin, pstdout, pstderr|
+            pstatus = popen4("zfs destroy #{@dzfs}@#{lastsnapshot}") do |pid, pstdin, pstdout, pstderr|
               out = pstdout.read.strip
               err = pstderr.read.strip
-             end
-             @log.debug " destroying #{@dhost}:#{@dzfs}@#{lastsnapshot} snapshot"
-           end
+            end
+            @log.debug " destroying #{@dhost}:#{@dzfs}@#{lastsnapshot} snapshot"
+          end
 
-           skt.close
-           ctx.close
+          skt.close
+          ctx.close
 
 #        end
 
         @log.info "#{@shost}:#{@szfs}@#{nextsnapshot} #{@dhost}:#{@dzfs} END"
 
       end
+
+      unlock
 
     end
 
