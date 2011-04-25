@@ -116,11 +116,11 @@ module ZettaBee
       end
 
       def output_version
-        $stderr.write "#{ZettaBee::VERSION}\n"
+        $stderr.write "#{VERSION}\n"
       end
 
       def output_help
-        $stderr.write "#{ME} v#{ZettaBee::VERSION}\n"
+        $stderr.write "#{ME} v#{VERSION}\n"
         $stderr.write " #{ME} [<options>] <action> [<destination>]\n"
       end
 
