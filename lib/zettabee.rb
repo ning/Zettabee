@@ -30,7 +30,7 @@ module ZettaBee
     DESTINFS_ZFSP = "#{ZFIX}:destinfs"
     CREATION_ZFSP = "creation"
 
-    STATE = { :synchronized => "Synchronized", :uninitializez => "Uninitialized" }
+    STATE = { :synchronized => "Synchronized", :uninitialized => "Uninitialized" }
     STATUS = { :idle => "Idle", :running => "Running", :initializing => "Initializing" }
 
     class Error < StandardError; end
@@ -88,7 +88,7 @@ module ZettaBee
     end
 
     def output_status
-      print Kernel.sprintf("%s:%s  %s:%s  %s  %s  %s:%d  %s\n",@shost.ljust(8),@szfs.ljust(38),@dhost.rjust(8),@dzfs.ljust(36),state.ljust(14),lag,lastsnapshot.rjust(24),@port,status)
+      print Kernel.sprintf("%s:%s  %s:%s  %s  %s  %s:%d  %s\n",@shost.ljust(8),@szfs.ljust(45),@dhost.rjust(8),@dzfs.ljust(36),state.ljust(14),lag,lastsnapshot.rjust(26),@port,status)
     end
 
     def is_running?
@@ -104,7 +104,7 @@ module ZettaBee
 
     def lastsnapshot
       l = getzfsproperty(@dzfs,LASTSNAP_ZFSP)
-      l.nil? ? '' : l
+      l.nil? ? '-' : l
     end
 
     def lag
@@ -120,9 +120,7 @@ module ZettaBee
     end
 
     def state
-      s = '-'
-      is_initialized? ? s = STATE[:synchronized] : s = STATE[:uninitialized]
-      s
+      is_initialized? ? STATE[:synchronized] : STATE[:uninitialized]
     end
 
     def status
