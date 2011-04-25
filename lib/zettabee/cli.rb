@@ -40,7 +40,7 @@ module ZettaBee
       def parsed_options?
         opts = OptionParser.new
         opts.on('-V', '--version')                                                          { output_version ; exit 0 }
-        opts.on('-h', '--help')                                                             { output_help }
+        opts.on('-h', '--help')                                                             { output_help ; exit 0}
         opts.on('-d', '--debug', "Debug mode" )                                             { @options.debug = true }
         opts.on('-v', '--verbose', "Verbose Mode")                                          { @options.verbose = true }
         opts.on('-n', '--nagios NAGIOSHOST', String, "Nagios Host for NSCA")                { |nagioshost| @options.nagios = nagioshost }
@@ -115,7 +115,16 @@ module ZettaBee
 
       end
 
-      def output_usage(exit_status)
+      def output_version
+        $stderr.write "#{ZettaBee::VERSION}\n"
+      end
+
+      def output_help
+        $stderr.write "#{ME} v#{ZettaBee::VERSION}\n"
+        $stderr.write " #{ME} [<options>] <action> [<destination>]\n"
+      end
+
+      def output_options(exit_status)
 
         puts "Options:\n"
 
