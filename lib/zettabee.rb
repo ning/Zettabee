@@ -30,8 +30,12 @@ module ZettaBee
     DESTINFS_ZFSP = "#{ZFIX}:destinfs"
     CREATION_ZFSP = "creation"
 
+    STATE = { :synchronized => "Synchronized", :uninitializez => "Uninitialized" }
+    STATUS = { :idle => "Idle", :running => "Running", :initializing => "Initializing" }
+
     class Error < StandardError; end
     class SSHError < Error; end
+    class ConfigurationError < Error; end
 
     def ZettaBee.readconfig()
       begin
@@ -46,7 +50,7 @@ module ZettaBee
           c[2].split(',').each do |o|
             cfgoptions[o.split('=')[0]] = o.split('=')[1]
           end
-          abort "duplicate destination in configuration file: #{dzfs}" if zfsrs.has_key?(dzfs)
+          raise ConfigurationError "duplicate destination in configuration file: #{dzfs}" if zfsrs.has_key?(dzfs)
           zfsrs[dzfs] = ZettaBee.new(shost,szfs,dhost,dzfs,cfgoptions)
         end
         zfsrs
@@ -82,27 +86,49 @@ module ZettaBee
       end
     end
 
-    def status
-      # need to detect when state is inconsistent: for instance, if the zfsrem property exists but no
-      # snapshots exist, and the like
-      lastsnapshot = getzfsproperty(@dzfs,LASTSNAP_ZFSP)
-      lastsnapshot_creation = getzfsproperty("#{@dzfs}@#{lastsnapshot}","creation")
-
-      if lastsnapshot_creation then
-        is_running? ? remstatus = "Running" : remstatus = "Idle"
-        remstate = "Synchronized"
-
-        hours,minutes,seconds,frac = Date.day_fraction_to_time(DateTime.now() - DateTime.parse(lastsnapshot_creation))
-        Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d  %s:%d  %s",@shost.ljust(8),@szfs.ljust(38),@dhost.rjust(8),@dzfs.ljust(36),remstate.ljust(14),hours,minutes,seconds,lastsnapshot.rjust(24),@port,remstatus)
-      else
-        is_running? ? remstatus = "Initalizing" : remstatus = "Uninitialized"
-        remstate = "Uninitialized"
-        Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d  %s:%d  %s",@shost.ljust(8),@szfs.ljust(38),@dhost.rjust(8),@dzfs.ljust(36),remstate.ljust(14),0,0,0,"-".rjust(24),@port,remstatus)
-      end
+    def output_status
+      Kernel.sprintf("%s:%s  %s:%s  %s  %s  %s:%d  %s",@shost.ljust(8),@szfs.ljust(38),@dhost.rjust(8),@dzfs.ljust(36),state.ljust(14),lag,lastsnapshot.rjust(24),@port,status)
     end
 
     def is_running?
       File.exists?(@zmqsock) ? true : false
+    end
+
+    def is_initialized?
+      lastsnapshot = getzfsproperty(@dzfs,LASTSNAP_ZFSP)
+      lastsnapshot_creation = getzfsproperty("#{@dzfs}@#{lastsnapshot}",CREATION_ZFSP)
+
+      lastsnapshot_creation ? true : false 
+    end
+
+    def lastsnapshot
+      getzfsproperty(@dzfs,LASTSNAP_ZFSP)
+    end
+
+    def lag
+      hours = 0
+      minutes = 0
+      seconds = 0
+      if is_initialized?
+        lastsnapshot = getzfsproperty(@dzfs,LASTSNAP_ZFSP)
+        lastsnapshot_creation = getzfsproperty("#{@dzfs}@#{lastsnapshot}",CREATION_ZFSP)
+        hours,minutes,seconds,frac = Date.day_fraction_to_time(DateTime.now() - DateTime.parse(lastsnapshot_creation))
+      end
+      Kernel.sprintf("%3d:%02d:%02d",hours,minutes,seconds)
+    end
+
+    def state
+      is_initialized? ? STATE[:synchronized] : STATE[:uninitialized]
+    end
+
+    def status
+      s = nil
+      if is_initialized? then
+        is_running? ? s = STATUS[:running] : s = STATUS[:idle]
+      else
+        is_running? ? s = STATUS[:initializing] : s = STATUS[:idle]
+      end
+      s
     end
 
     def runstatus(interval=0)
