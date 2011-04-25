@@ -119,13 +119,13 @@ module ZettaBee
     end
 
     def state
-      s = nil
+      s = '-'
       is_initialized? ? s = STATE[:synchronized] : s = STATE[:uninitialized]
       s
     end
 
     def status
-      s = nil
+      s = '-'
       if is_initialized? then
         is_running? ? s = STATUS[:running] : s = STATUS[:idle]
       else
