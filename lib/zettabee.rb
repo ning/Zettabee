@@ -103,7 +103,8 @@ module ZettaBee
     end
 
     def lastsnapshot
-      getzfsproperty(@dzfs,LASTSNAP_ZFSP)
+      l = getzfsproperty(@dzfs,LASTSNAP_ZFSP)
+      l.nil? ? '' : l
     end
 
     def lag
