@@ -77,7 +77,7 @@ module ZettaBee
 
     def execute(action)
       case action
-        when :status then print "#{status}\n"
+        when :status then output_status
         when :runstatus then runstatus
         when :initialize then run(:initialize)
         when :update  then run(:update)
@@ -87,7 +87,7 @@ module ZettaBee
     end
 
     def output_status
-      Kernel.sprintf("%s:%s  %s:%s  %s  %s  %s:%d  %s",@shost.ljust(8),@szfs.ljust(38),@dhost.rjust(8),@dzfs.ljust(36),state.ljust(14),lag,lastsnapshot.rjust(24),@port,status)
+      print Kernel.sprintf("%s:%s  %s:%s  %s  %s  %s:%d  %s\n",@shost.ljust(8),@szfs.ljust(38),@dhost.rjust(8),@dzfs.ljust(36),state.ljust(14),lag,lastsnapshot.rjust(24),@port,status)
     end
 
     def is_running?
