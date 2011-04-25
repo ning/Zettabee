@@ -77,6 +77,7 @@ module ZettaBee
 
     def execute(action)
       case action
+        when :setup then setup
         when :status then output_status
         when :runstatus then runstatus
         when :initialize then run(:initialize)
@@ -118,7 +119,9 @@ module ZettaBee
     end
 
     def state
-      is_initialized? ? STATE[:synchronized] : STATE[:uninitialized]
+      s = nil
+      is_initialized? ? s = STATE[:synchronized] : s = STATE[:uninitialized]
+      s
     end
 
     def status
@@ -162,10 +165,10 @@ module ZettaBee
       end
     end
 
-    def setup
-      # create run directory
-      # create log directory
-      # create configuration directory and empty configuration file
+    def setup(rundir="/local/var/run/#{ZFIX}",logdir="/local/var/log/#{ZFIX}",cfgdir="/local/etc/#{ZFIX}")
+      FileUtils.mkdir_p(rundir)
+      FileUtils.mkdir_p(logdir)
+      FileUtils.mkdir_p(cfgdir)
     end
 
     def zfsproperty(action,zfsfs,property,value=nil,session=nil)
@@ -331,6 +334,8 @@ module ZettaBee
 
            pid, stdin, stdout, stderr = popen4("mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@dzfs}")
            @log.debug " launched 'mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@dzfs}' [pid #{pid}]"
+
+          sleep(30) # this sleep is intended to let zfs recv get ready
 
            sessionchannel = session.open_channel do |channel|
              @log.debug " starting SSH session channel to #{@shost}"

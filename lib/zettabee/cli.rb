@@ -86,35 +86,33 @@ module ZettaBee
       def process_command
 
         @zfsrs = ZettaBee.readconfig()
+        execzfsrs = []
 
         if @destination then
-          zfsr = nil
+          # a destination can be fully specified (a/b/c) or using the last component (c)
           if @destination.split('/').length > 1
-            zfsr = @zfsrs[@destination]
+            execzfsrs.push(@zfsrs[@destination])
           elsif @destination.split('/').length == 1
             @zfsrs.each_key do |key|
               if key.split('/')[-1] == @destination
-                zfsr = @zfsrs[key]
+                execzfsrs.push(@zfsrs[key])
               end
             end
           end
-          if zfsr.nil?
-            abort "error: invalid destination: #{@destination}"
-          else
-            zfsr.execute(@action.to_sym)
-            Utilities.send_nsca(zfsr.dhost,"#{ME}:#{zfsr.port}",0,"#{zfsr.shost}:#{zfsr.szfs} #{@action.to_s.upcase} #{zfsr.dhost}:#{zfsr.dzfs}",@options.nagios) if @options.nagios
-          end
+          abort "error: invalid destination: #{@destination}" unless execzfsrs.length == 1
         else
           if @action == "status"
-            @zfsrs.each_value do |zfsr|
-              zfsr.execute(@action.to_sym)
-              Utilities.send_nsca(zfsr.dhost,"#{ME}:#{zfsr.port}",0,"#{zfsr.shost}:#{zfsr.szfs} #{@action.to_s.upcase} #{zfsr.dhost}:#{zfsr.dzfs}",@options.nagios) if @options.nagios
-
-            end
+            @zfsrs.each_value { |zfsr| execzfsrs.push(zfsr) }
           else
             abort "error: only status action can be run against all destinations"
           end
         end
+
+        execzfsrs.each do |zfrs|
+          zfrs.execute(@action.to_sym)
+          Utilities.send_nsca(zfsr.dhost,"#{ME}:#{zfsr.port}",0,"#{zfsr.shost}:#{zfsr.szfs} #{@action.to_s.upcase} #{zfsr.dhost}:#{zfsr.dzfs}",@options.nagios) if @options.nagios
+        end
+
       end
 
       def output_usage(exit_status)
