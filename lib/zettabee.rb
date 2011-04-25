@@ -30,7 +30,7 @@ module ZettaBee
     DESTINFS_ZFSP = "#{ZFIX}:destinfs"
     CREATION_ZFSP = "creation"
 
-    STATE = { :synchronized => "Synchronized", :uninitialized => "Uninitialized" }
+    STATE = { :synchronized => "Synchronized", :uninitialized => "Uninitialized", :inconsistent => "Inconsistent" }
     STATUS = { :idle => "Idle", :running => "Running", :initializing => "Initializing" }
 
     class Error < StandardError; end
@@ -101,7 +101,7 @@ module ZettaBee
 
       lastsnapshot_creation ? true : false 
     end
-
+    
     def lastsnapshot
       l = getzfsproperty(@dzfs,LASTSNAP_ZFSP)
       l.nil? ? '-' : l
@@ -120,7 +120,15 @@ module ZettaBee
     end
 
     def state
-      is_initialized? ? STATE[:synchronized] : STATE[:uninitialized]
+      if is_initialized? then
+        STATE[:synchronized]
+      else
+        if getzfsproperty(@dzfs,CREATION_ZFSP)
+          STATE[:inconsistent]
+        else
+          STATE[:uninitialized]
+        end
+      end
     end
 
     def status

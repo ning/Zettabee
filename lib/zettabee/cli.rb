@@ -31,7 +31,8 @@ module ZettaBee
         process_arguments
         process_command
       else
-        output_usage(127)
+        output_help
+        exit 127
       end
     end
 
@@ -55,7 +56,7 @@ module ZettaBee
 
       def arguments_valid?
         if @arguments.length < 1 or @arguments.length > 2
-          $stderr.puts "Invalid number of arguments: #{@arguments}"
+          $stderr.puts "#{ME}: error: invalid number of arguments: #{@arguments}"
           return false
         end
         true
@@ -120,8 +121,20 @@ module ZettaBee
       end
 
       def output_help
-        $stderr.write "#{ME} v#{VERSION}\n"
-        $stderr.write " #{ME} [<options>] <action> [<destination>]\n"
+        $stderr.write "#{ME} [<options>] <action> [<destination>]\n"
+        $stderr.write "\n"
+        $stderr.write " <action>   setup                     : initial #{ME} setup\n"
+        $stderr.write "            status [<destination>]    : display status for all destinations or <destination>\n"
+        $stderr.write "            runstatus <destination>   : show running status for <destination>\n"
+        $stderr.write "            initialize <destination>  : perform first sync for <destination>\n"
+        $stderr.write "            update <destination>      : update sync for <destination>\n"
+        $stderr.write "            \n"
+        $stderr.write " <options>  -d, --debug               : debug (to logfile)\n"
+        $stderr.write "            -v, --verbose             : verbose (to console)\n"
+        $stderr.write "            -n, --nagios <nagioshost> : send NSCA result to <nagioshost>\n"
+        $stderr.write "            -c, --config <configfile> : read configuration from <configfile>\n"
+        $stderr.write "            \n"
+        $stderr.write " <destination> is <host>:<filesystem>\n"
       end
 
       def output_options(exit_status)
