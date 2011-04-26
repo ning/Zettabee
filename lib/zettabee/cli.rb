@@ -94,6 +94,7 @@ module ZettaBee
         @zfsrs = ZettaBee.readconfig()
         execzfsrs = []
 
+
         if @destination then
           # a destination can be fully specified (a/b/c) or using the last component (c)
           if @destination.split('/').length > 1
@@ -115,17 +116,37 @@ module ZettaBee
         end
 
         execzfsrs.each do |zfrs|
+          sn = NSCA.new(@options.nagios,@hostname,"#{ME}:#{zfrs.port}")
+          sn_rt = NAGIOS_OK
+          sn_svc_out = "#{@action.to_s.upcase} #{zfrs.dhost}:#{zfrs.dzfs}: #{zfrs.status} #{zfrs.lag(:string)}"
+
           begin
             zfrs.execute(@action.to_sym)
           rescue ZettaBee::IsRunningInfo
-            zfrs.execute(:status)
-            exit 0
+            zfrs.execute(:status) unless @options.nagios
           rescue => e
             $stderr.write "#{ME}: error: #{@action.to_s.upcase} #{zfrs.dhost}:#{zfrs.dzfs}: #{e.message}\n"
-            Utilities.send_nsca(zfsr.dhost,"#{ME}:#{zfsr.port}",NAGIOS_CRITICAL,"#{@action.to_s.upcase} #{zfrs.dhost}:#{zfrs.dzfs}: #{e.message}",@options.nagios) if @options.nagios
-            exit 3
+            sn_rt = NAGIOS_CRITICAL
+            sn_svc_out += ": #{e.message}"
+          ensure
+            if @options.nagios then
+              if zfrs.lag >= zfrs.clag then
+                sn_rt = NAGIOS_CRITICAL
+                sn_svc_out += ": lag is CRITICAL"
+              elsif zfrs.lag >= zfrs.wlag then
+                sn_rt = NAGIOS_WARNING
+                sn_svc_out += ": lag is WARNING"
+              else
+                sn_svc_out += ": OK"
+              end
+            end
           end
-          Utilities.send_nsca(zfsr.dhost,"#{ME}:#{zfsr.port}",0,"#{@action.to_s.upcase} #{zfrs.dhost}:#{zfrs.dzfs}: OK",@options.nagios) if @options.nagios
+
+          begin
+            sn.send_nsca(sn_rt,sn_svc_out) if @options.nagios
+          rescue NSCA::SendNSCAError => e
+            $stderr.write "#{ME}: error: send_nsca failed: #{e.message}\n"
+          end
         end
 
       end
@@ -160,14 +181,5 @@ module ZettaBee
         end
         exit exit_status
       end
-  end
-
-  class Utilities
-    def Utilities.send_nsca(hostname,svc_descr,rt,svc_output,nagioshost="nagios",send_nsca_cfg="/usr/local/etc/nsca/send_nsca.cfg")
-      pstatus = popen4("/usr/local/bin/send_nsca -H #{nagioshost} -c #{send_nsca_cfg}") do |pid, pstdin, pstdout, pstderr|
-        pstdin.write("#{hostname}\t#{svc_descr}\t#{rt}\t#{svc_output}\n")
-        pstdin.close
-      end
-    end
   end
 end

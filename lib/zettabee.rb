@@ -22,7 +22,7 @@ module ZettaBee
     @cfgfile = nil
     class << self; attr_accessor :debug, :nagios, :verbose, :cfgfile; end
 
-    attr_reader :shost, :szfs, :dhost, :dzfs, :transport, :port, :sshport, :sshkey
+    attr_reader :shost, :szfs, :dhost, :dzfs, :transport, :port, :sshport, :sshkey, :clag, :wlag
 
     ZFIX = "zettabee"
 
@@ -76,6 +76,8 @@ module ZettaBee
       @port = cfgoptions['port']
       @sshport = cfgoptions['sshport']
       @sshkey = cfgoptions['sshkey']
+      @clag = cfgoptions['clag'].to_i
+      @wlag = cfgoptions['wlag'].to_i
       @logfile = "/local/var/log/#{ZFIX}/#{@port}.log"
       @zmqsock = "/local/var/run/#{ZFIX}/#{@port}.zmq"
       @lckfile = "/local/var/run/#{ZFIX}/#{@port}.lck"
@@ -97,7 +99,12 @@ module ZettaBee
     end
 
     def output_status
-      print Kernel.sprintf("%s:%s  %s:%s  %s  %s  %s:%d  %s\n",@shost.ljust(8),@szfs.ljust(45),@dhost.rjust(8),@dzfs.ljust(36),state.ljust(14),lag,lastsnapshot.rjust(26),@port,status)
+      h,m,s= lag(:hms)
+      l = lag()
+      lbang = " "
+      lbang = '+' if l > @wlag
+      lbang = '!' if l > @clag
+      print Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d%s  %s:%d  %s\n",@shost.ljust(8),@szfs.ljust(45),@dhost.rjust(8),@dzfs.ljust(36),state.ljust(14),h,m,s,lbang,lastsnapshot.rjust(26),@port,status)
     end
 
     def lock
@@ -145,16 +152,22 @@ module ZettaBee
       l.nil? ? '-' : l
     end
 
-    def lag
-      hours = 0
-      minutes = 0
-      seconds = 0
-      if is_initialized?
+    def lag(mode=nil)
+      h,m,s = 0,0,0
+      if is_initialized? then
         lastsnapshot = getzfsproperty(@dzfs,LASTSNAP_ZFSP)
         lastsnapshot_creation = getzfsproperty("#{@dzfs}@#{lastsnapshot}",CREATION_ZFSP)
-        hours,minutes,seconds,frac = Date.day_fraction_to_time(DateTime.now() - DateTime.parse(lastsnapshot_creation))
+        dt_delta = DateTime.now - DateTime.parse(lastsnapshot_creation)
+        h,m,s,f = DateTime.day_fraction_to_time(dt_delta)
+        seconds = h * 60 * 60 + m * 60 + s
       end
-      Kernel.sprintf("%3d:%02d:%02d",hours,minutes,seconds)
+      if mode.nil? then
+        return seconds
+      elsif mode == :hms then
+        return h,m,s
+      elsif mode == :string then
+        return Kernel.sprintf("%d:%02d:%02d",h,m,s)
+      end
     end
 
     def state
