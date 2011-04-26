@@ -31,7 +31,7 @@ module ZettaBee
     DESTINFS_ZFSP = "#{ZFIX}:destinfs"
     CREATION_ZFSP = "creation"
 
-    STATE = { :synchronized => "Synchronized", :uninitialized => "Uninitialized", :inconsistent => "Inconsistent" }
+    STATE = { :synchronized => "Synchronized", :uninitialized => "Uninitialized", :inconsistent => "Inconsistent!" }
     STATUS = { :idle => "Idle", :running => "Running", :initializing => "Initializing" }
 
     class Error < StandardError; end
@@ -102,8 +102,10 @@ module ZettaBee
       h,m,s= lag(:hms)
       l = lag()
       lbang = " "
-      lbang = '+' if l > @wlag
-      lbang = '!' if l > @clag
+      unless l.nil?
+        lbang = '+' if l > @wlag
+        lbang = '!' if l > @clag
+      end
       print Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d%s  %s:%d  %s\n",@shost.ljust(8),@szfs.ljust(45),@dhost.rjust(8),@dzfs.ljust(36),state.ljust(14),h,m,s,lbang,lastsnapshot.rjust(26),@port,status)
     end
 
@@ -154,6 +156,7 @@ module ZettaBee
 
     def lag(mode=nil)
       h,m,s = 0,0,0
+      seconds = 0
       if is_initialized? then
         lastsnapshot = getzfsproperty(@dzfs,LASTSNAP_ZFSP)
         lastsnapshot_creation = getzfsproperty("#{@dzfs}@#{lastsnapshot}",CREATION_ZFSP)
@@ -348,6 +351,7 @@ module ZettaBee
           zfsrecv_opts = "-o #{SOURCEFS_ZFSP}='#{@shost}:#{@szfs}' -o #{DESTINFS_ZFSP}='#{@dhost}:#{@dzfs}'"
         when :update then
           raise StateError, "cannot update: #{@dzfs} does not exists" unless getzfsproperty(@dzfs,CREATION_ZFSP)
+          raise StateError, "cannot update: #{lastsnapshot} snapshot does not exists" unless getzfsproperty("#{@dzfs}@#{lastsnapshot}",CREATION_ZFSP)
           raise StateError, "error: cannot update: cannot determine #{@dzfs}:#{LASTSNAP_ZFSP} property" unless lastsnapshot
           zfssend_opts = "-i #{lastsnapshot}"
         else

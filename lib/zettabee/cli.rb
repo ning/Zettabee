@@ -126,11 +126,14 @@ module ZettaBee
             zfrs.execute(:status) unless @options.nagios
           rescue => e
             $stderr.write "#{ME}: error: #{@action.to_s.upcase} #{zfrs.dhost}:#{zfrs.dzfs}: #{e.message}\n"
-            sn_rt = NAGIOS_CRITICAL
+            sn_rt = NAGIOS_UNKNOWN
             sn_svc_out += ": #{e.message}"
           ensure
             if @options.nagios then
-              if zfrs.lag >= zfrs.clag then
+              if zfrs.state == ZettaBee::STATE[:inconsistent] then # really need is_consistent? method
+                sn_rt = NAGIOS_CRITICAL
+                sn_svc_out += ": state is #{ZettaBee::STATE[:inconsistent]}"
+              elsif zfrs.lag >= zfrs.clag or 
                 sn_rt = NAGIOS_CRITICAL
                 sn_svc_out += ": lag is CRITICAL"
               elsif zfrs.lag >= zfrs.wlag then
