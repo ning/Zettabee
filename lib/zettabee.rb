@@ -22,7 +22,7 @@ module ZettaBee
     @cfgfile = nil
     class << self; attr_accessor :debug, :nagios, :verbose, :cfgfile; end
 
-    attr_reader :shost, :szfs, :dhost, :dzfs, :transport, :port, :sshport, :sshkey, :clag, :wlag
+    attr_reader :shost, :szfs, :dhost, :dzfs, :transport, :port, :sshport, :sshkey, :clag, :wlag, :nagios_svc_description
 
     ZFIX = "zettabee"
 
@@ -78,6 +78,7 @@ module ZettaBee
       @sshkey = cfgoptions['sshkey']
       @clag = cfgoptions['clag'].to_i
       @wlag = cfgoptions['wlag'].to_i
+      @nagios_svc_description = "service/#{ZFIX}:#{@dhost}:#{@port}"
       @logfile = "/local/var/log/#{ZFIX}/#{@port}.log"
       @zmqsock = "/local/var/run/#{ZFIX}/#{@port}.zmq"
       @lckfile = "/local/var/run/#{ZFIX}/#{@port}.lck"
