@@ -116,7 +116,7 @@ module ZettaBee
         end
 
         execzfsrs.each do |zfrs|
-          sn = NSCA.new(@options.nagios,zfrs.dhost,"#{ME}:#{zfrs.dhost}:#{zfrs.port}")
+          sn = NSCA.new(@options.nagios,zfrs.dhost,zfrs.nagios_svc_description)
           sn_rt = NAGIOS_OK
           sn_svc_out = "#{@action.to_s.upcase} #{zfrs.dhost}:#{zfrs.dzfs}: #{zfrs.status} #{zfrs.lag(:string)}"
 
