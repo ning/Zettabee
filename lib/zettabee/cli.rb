@@ -118,7 +118,7 @@ module ZettaBee
         execzfsrs.each do |zfrs|
           sn = NSCA.new(@options.nagios,zfrs.dhost,zfrs.nagios_svc_description)
           sn_rt = NAGIOS_OK
-          sn_svc_out = "#{@action.to_s.upcase} #{zfrs.dhost}:#{zfrs.dzfs}: #{zfrs.status} #{zfrs.lag(:string)}"
+          sn_svc_out = "#{@action.to_s.upcase} #{zfrs.dhost}:#{zfrs.dzfs}: "
 
           begin
             zfrs.execute(@action.to_sym)
@@ -130,6 +130,7 @@ module ZettaBee
             sn_svc_out += ": #{e.message}"
           ensure
             if @options.nagios then
+              sn_svc_out += "#{zfrs.status} #{zfrs.lag(:string)}"
               if zfrs.state == ZettaBee::STATE[:inconsistent] then # really need is_consistent? method
                 sn_rt = NAGIOS_CRITICAL
                 sn_svc_out += ": state is #{ZettaBee::STATE[:inconsistent]}"
