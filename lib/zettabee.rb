@@ -102,6 +102,7 @@ module ZettaBee
       h,m,s= lag(:hms)
       l = lag()
       lbang = " "
+      lbang = "L" if is_locked?
       unless l.nil?
         lbang = '+' if l > @wlag
         lbang = '!' if l > @clag
@@ -165,7 +166,7 @@ module ZettaBee
         seconds = h * 60 * 60 + m * 60 + s
       end
       if mode.nil? then
-        return seconds
+        return seconds.to_i
       elsif mode == :hms then
         return h,m,s
       elsif mode == :string then

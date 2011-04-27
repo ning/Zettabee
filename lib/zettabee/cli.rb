@@ -133,7 +133,7 @@ module ZettaBee
               if zfrs.state == ZettaBee::STATE[:inconsistent] then # really need is_consistent? method
                 sn_rt = NAGIOS_CRITICAL
                 sn_svc_out += ": state is #{ZettaBee::STATE[:inconsistent]}"
-              elsif zfrs.lag >= zfrs.clag or 
+              elsif zfrs.lag >= zfrs.clag then
                 sn_rt = NAGIOS_CRITICAL
                 sn_svc_out += ": lag is CRITICAL"
               elsif zfrs.lag >= zfrs.wlag then
