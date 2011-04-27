@@ -57,7 +57,7 @@ module ZettaBee
           c[2].split(',').each do |o|
             cfgoptions[o.split('=')[0]] = o.split('=')[1]
           end
-          raise ConfigurationError "duplicate destination in configuration file: #{dzfs}" if zfsrs.has_key?(dzfs)
+          raise ConfigurationError, "duplicate destination in configuration file: #{dzfs}" if zfsrs.has_key?(dzfs)
           zfsrs[dzfs] = ZettaBee.new(shost,szfs,dhost,dzfs,cfgoptions)
         end
         zfsrs
@@ -259,7 +259,7 @@ module ZettaBee
                   zfspropval = data
                 end
               else
-                raise SSHError "could not open SSH channel"
+                raise SSHError, "could not open SSH channel"
               end
             end
           end
@@ -383,13 +383,13 @@ module ZettaBee
                 @log.debug "  channel closed"
               end
             else
-              raise SSHError "unable to open SSH channel to #{@shost} to create snapshot #{nextsnapshot}"
+              raise SSHError, "unable to open SSH channel to #{@shost} to create snapshot #{nextsnapshot}"
             end
           end
         end
         sessionchannel.wait
 
-        raise ZFSError "unable to create remote snapshot #{@shost}:#{@szfs}@#{nextsnapshot}: #{eo}" unless ec == 0
+        raise ZFSError, "unable to create remote snapshot #{@shost}:#{@szfs}@#{nextsnapshot}: #{eo}" unless ec == 0
         @log.debug " successfully created remote snapshot #{@shost}:#{@szfs}@#{nextsnapshot}"
         ec = nil
         eo = nil
@@ -422,13 +422,13 @@ module ZettaBee
                 Process.kill(:TERM,pid)
                 skt.close
                 ctx.close
-                raise SSHError "unable to open channel to zfs send #{@shost}:#{@szfs}@#{nextsnapshot}"
+                raise SSHError, "unable to open channel to zfs send #{@shost}:#{@szfs}@#{nextsnapshot}"
               end
             end
           end
           sessionchannel.wait
 
-          raise ZFSError "failed to zfs send #{@shost}:#{@szfs}@#{nextsnapshot}: #{stderr.readlines()}" unless ec == 0
+          raise ZFSError, "failed to zfs send #{@shost}:#{@szfs}@#{nextsnapshot}: #{stderr.readlines()}" unless ec == 0
           setzfsproperty(@dzfs,LASTSNAP_ZFSP,nextsnapshot)
           setzfsproperty(@szfs,LASTSNAP_ZFSP,nextsnapshot,session)
 
@@ -446,7 +446,7 @@ module ZettaBee
                    eo = data
                   end
                 else
-                  raise SSHError "unable to open SSH channel to #{@shost} to destroy snapshot #{lastsnapshot}"
+                  raise SSHError, "unable to open SSH channel to #{@shost} to destroy snapshot #{lastsnapshot}"
                 end
               end
             end
