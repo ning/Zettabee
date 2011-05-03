@@ -78,6 +78,7 @@ module ZettaBee
       @sshkey = cfgoptions['sshkey']
       @clag = cfgoptions['clag'].to_i
       @wlag = cfgoptions['wlag'].to_i
+      @runstart = 0
       @nagios_svc_description = "service/#{ZFIX}:#{@dhost}:#{@port}"
       @logfile = "/local/var/log/#{ZFIX}/#{@port}.log"
       @zmqsock = "/local/var/run/#{ZFIX}/#{@port}.zmq"
@@ -108,7 +109,8 @@ module ZettaBee
         lbang = '+' if l > @wlag
         lbang = '!' if l > @clag
       end
-      print Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d%s  %s:%d  %s\n",@shost.ljust(8),@szfs.ljust(45),@dhost.rjust(8),@dzfs.ljust(36),state.ljust(14),h,m,s,lbang,lastsnapshot.rjust(26),@port,status)
+      rh,rm,rs = runtime(:hms)
+      print Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d%s  %s:%d  %s (%3d:%02d:%02d%s)\n",@shost.ljust(8),@szfs.ljust(45),@dhost.rjust(8),@dzfs.ljust(36),state.ljust(14),h,m,s,lbang,lastsnapshot.rjust(26),@port,status,rh,rm,rs)
     end
 
     def lock
@@ -163,6 +165,23 @@ module ZettaBee
         lastsnapshot = getzfsproperty(@dzfs,LASTSNAP_ZFSP)
         lastsnapshot_creation = getzfsproperty("#{@dzfs}@#{lastsnapshot}",CREATION_ZFSP)
         dt_delta = DateTime.now - DateTime.parse(lastsnapshot_creation)
+        h,m,s,f = DateTime.day_fraction_to_time(dt_delta)
+        seconds = h * 60 * 60 + m * 60 + s
+      end
+      if mode.nil? then
+        return seconds.to_i
+      elsif mode == :hms then
+        return h,m,s
+      elsif mode == :string then
+        return Kernel.sprintf("%d:%02d:%02d",h,m,s)
+      end
+    end
+
+    def runtime(mode=nil)
+      h,m,s = 0,0,0
+      seconds = 0
+      if is_running? then
+        dt_delta = DateTime.now - @runstart
         h,m,s,f = DateTime.day_fraction_to_time(dt_delta)
         seconds = h * 60 * 60 + m * 60 + s
       end
@@ -332,6 +351,8 @@ module ZettaBee
     def run(mode)
 
       lock
+
+      @runstart = DateTime.now
 
       ctx = ZMQ::Context.new()
       skt = ctx.socket(ZMQ::PUB)
