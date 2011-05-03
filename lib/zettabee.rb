@@ -110,7 +110,7 @@ module ZettaBee
         lbang = '!' if l > @clag
       end
       rh,rm,rs = runtime(:hms)
-      print Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d%s  %s:%d  %s (%3d:%02d:%02d%s)\n",@shost.ljust(8),@szfs.ljust(45),@dhost.rjust(8),@dzfs.ljust(36),state.ljust(14),h,m,s,lbang,lastsnapshot.rjust(26),@port,status,rh,rm,rs)
+      print Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d%s  %s:%d  %s (%d:%02d:%02d)\n",@shost.ljust(8),@szfs.ljust(45),@dhost.rjust(8),@dzfs.ljust(36),state.ljust(14),h,m,s,lbang,lastsnapshot.rjust(26),@port,status,rh,rm,rs)
     end
 
     def lock
@@ -181,7 +181,7 @@ module ZettaBee
       h,m,s = 0,0,0
       seconds = 0
       if is_running? then
-        dt_delta = DateTime.now - @runstart
+        dt_delta = DateTime.now - DateTime.parse(File.ctime(@zmqsock).to_s)
         h,m,s,f = DateTime.day_fraction_to_time(dt_delta)
         seconds = h * 60 * 60 + m * 60 + s
       end
@@ -352,11 +352,11 @@ module ZettaBee
 
       lock
 
-      @runstart = DateTime.now
-
       ctx = ZMQ::Context.new()
       skt = ctx.socket(ZMQ::PUB)
       skt.bind statuszocket
+
+      @runstart = DateTime.parse(File.ctime(@zmqsock).to_s)
       
       @log.add Log4r::FileOutputter.new("logfile", :filename => @logfile, :trunc => false, :formatter => Log4r::PatternFormatter.new(:pattern => "[%d] #{ZFIX}:%c [%p] %l %m"), :level => log4level)
       @log.add Log4r::StdoutOutputter.new('console', :formatter => Log4r::PatternFormatter.new(:pattern => "[%d] #{ZFIX}:%c [%p] %l %m"), :level => Log4r::DEBUG) if ZettaBee.verbose
