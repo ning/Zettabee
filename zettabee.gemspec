@@ -13,6 +13,11 @@ Gem::Specification.new do |s|
 
   s.required_rubygems_version = ">= 1.3.5"
 
+  s.add_dependency('log4r', '>= 1.1.9')
+  s.add_dependency('net-ssh', '>= 2.1.3')
+  s.add_dependency('open4', '>= 1.0.1')
+  s.add_dependency('zmq', '>= 2.1.0.1')
+
   s.files        = [ 'lib/zettabee.rb', 'lib/zettabee/cli.rb', 'lib/zettabee/version.rb', 'lib/zettabee/nsca.rb', 'bin/zettabee' ]
   s.executables  = [ 'zettabee' ]
   s.require_path = 'lib'
