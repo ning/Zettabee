@@ -326,33 +326,53 @@ module ZettaBee
 
 
 
-    def create_zfs_snapshot(zfs,snapshot,session)
+    def create_zfs_snapshot(zfs,snapshot,session=nil)
+      _credes_zfs_snapshot(:create,snapshot,session)
+    end
+
+    def destroy_zfs_snapshot(zfs,snapshot,session=nil)
+      _credes_zfs_snapshot(:destroy,snapshot,session)
+    end
+
+    def _credes_zfs_snapshot(credes,zfs,snapshot,session=nil)
+      command = "false"
+      case credes
+        when :create  then command = "zfs snapshot #{zfs}@#{snapshot}"
+        when :destroy then command = "zfs destroy #{zfs}@#{snapshot}"
+      end
       ec = nil
       eo = nil
-      sessionchannel = session.open_channel do |channel|
-      @log.debug " starting SSH session channel to #{session.host}"
-        channel.exec "zfs snapshot #{zfs}@#{snapshot}" do |ch,chs|
-          @log.debug "  channel.exec(zfs snapshot #{zfs}@#{snapshot})"
-          if chs
-            @log.debug("  creating #{zfs}@#{snapshot} snapshot")
-            channel.on_request "exit-status" do |ch, data|
-              ec = data.read_long
-              @log.debug "   exit-status received: #{ec}"
+      if session.nil? then
+        pid, stdin, stdout, stderr = popen4("#{command}")
+        ignored, status = Process::waitpid2 pid
+        stdoutbucket = stdout.readlines[0]
+        raise ZFSError, stdoutbucket.strip unless status.exitstatus == 0
+      else
+        sessionchannel = session.open_channel do |channel|
+        @log.debug " starting SSH session channel to #{session.host}"
+          channel.exec "zfs snapshot #{zfs}@#{snapshot}" do |ch,chs|
+            @log.debug "  channel.exec(zfs snapshot #{zfs}@#{snapshot})"
+            if chs
+              @log.debug("  creating #{zfs}@#{snapshot} snapshot")
+              channel.on_request "exit-status" do |ch, data|
+                ec = data.read_long
+                @log.debug "   exit-status received: #{ec}"
+              end
+              channel.on_extended_data do |ch,data|
+                eo = data
+              end
+              channel.on_close do |ch|
+                @log.debug "  channel closed"
+              end
+            else
+              raise SSHError, "unable to open SSH channel to #{session.host} to create snapshot #{snapshot}"
             end
-            channel.on_extended_data do |ch,data|
-              eo = data
-            end
-            channel.on_close do |ch|
-              @log.debug "  channel closed"
-            end
-          else
-            raise SSHError, "unable to open SSH channel to #{session.host} to create snapshot #{snapshot}"
           end
         end
+        sessionchannel.wait
+        raise ZFSError, "unable to create remote snapshot #{session.host}:#{zfs}@#{snapshot}: #{eo}" unless ec == 0
+        @log.debug " successfully created remote snapshot #{session.host}:#{zfs}@#{snapshot}"
       end
-      sessionchannel.wait
-      raise ZFSError, "unable to create remote snapshot #{session.host}:#{zfs}@#{snapshot}: #{eo}" unless ec == 0
-      @log.debug " successfully created remote snapshot #{session.host}:#{zfs}@#{snapshot}"
     end
 
     def zfs_send(zfs,snapshot,zfssend_opts,dhost,port,session,skt)
@@ -374,35 +394,13 @@ module ZettaBee
             channel.on_close do |ch|
             end
           else
-            Process.kill(:TERM,pid)
-            skt.close
-            ctx.close
             raise SSHError, "unable to open channel to zfs send #{@shost}:#{@szfs}@#{nextsnapshot}"
           end
         end
       end
       sessionchannel.wait
-
       raise ZFSError, "failed to zfs send #{@shost}:#{@szfs}@#{nextsnapshot}: #{stderr.readlines()}" unless ec == 0
     end
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -445,59 +443,29 @@ module ZettaBee
 
         create_zfs_snapshot(@szfs,nextsnapshot,session)
 
-#        begin
+        pid, stdin, stdout, stderr = popen4("mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@dzfs}")
+        @log.debug " launched 'mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@dzfs}' [pid #{pid}]"
 
-          pid, stdin, stdout, stderr = popen4("mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@dzfs}")
-          @log.debug " launched 'mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@dzfs}' [pid #{pid}]"
+        sleep(30) # this sleep is intended to let zfs recv get ready
 
-          sleep(30) # this sleep is intended to let zfs recv get ready
+        zfs_send(@szfs,nextsnapshot,zfssend_opts,@dhost,@port,session,skt)
+        sleep(30) # this sleep is intended to let zfs recv wrap up its work _after_ the transfer is done
 
-          zfs_send(@szfs,nextsnapshot,zfssend_opts,@dhost,@port,session,skt)
+        ignored, status = Process::waitpid2 pid
 
-          setzfsproperty(@dzfs,LASTSNAP_ZFSP,nextsnapshot)
-          setzfsproperty(@szfs,LASTSNAP_ZFSP,nextsnapshot,session)
+        setzfsproperty(@dzfs,LASTSNAP_ZFSP,nextsnapshot)
+        setzfsproperty(@szfs,LASTSNAP_ZFSP,nextsnapshot,session)
 
-          if mode == :update
+        if mode == :update
+          destroy_zfs_snapshot(@szfs,lastsnapshot,session)
+          destroy_zfs_snapshot(@dzfs,lastsnapshot)
+        end
 
-            sessionchannel = session.open_channel do |channel|
-              @log.debug " starting SSH session channel to #{@shost}"
-              channel.exec "zfs destroy #{@szfs}@#{lastsnapshot}" do |ch,chs|
-                if chs
-                  @log.debug(" destroying #{@shost}:#{@szfs}@#{lastsnapshot} snapshot")
-                  channel.on_request "exit-status" do |ch, data|
-                    ec = data.read_long
-                  end
-                  channel.on_extended_data do |ch,data|
-                   eo = data
-                  end
-                else
-                  raise SSHError, "unable to open SSH channel to #{@shost} to destroy snapshot #{lastsnapshot}"
-                end
-              end
-            end
-            sessionchannel.wait
-
-            sleep(30) # this sleep is intended to let zfs recv wrap up its work _after_ the transfer is done
-
-            pstatus = popen4("zfs destroy #{@dzfs}@#{lastsnapshot}") do |pid, pstdin, pstdout, pstderr|
-              out = pstdout.read.strip
-              err = pstderr.read.strip
-            end
-            @log.debug " destroying #{@dhost}:#{@dzfs}@#{lastsnapshot} snapshot"
-          end
-
-          skt.close
-          ctx.close
-
-#        end
-
+        skt.close
+        ctx.close
         @log.info "#{@shost}:#{@szfs}@#{nextsnapshot} #{@dhost}:#{@dzfs} END"
-
       end
-
       unlock
-
     end
-
   end
 end
