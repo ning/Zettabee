@@ -312,6 +312,10 @@ module ZettaBee
       "ipc://#{@zmqsock}"
     end
 
+    def create_status_socket
+
+    end
+
     def log4level
       if ZettaBee.debug
         Log4r::DEBUG
@@ -327,11 +331,11 @@ module ZettaBee
 
 
     def create_zfs_snapshot(zfs,snapshot,session=nil)
-      _credes_zfs_snapshot(:create,snapshot,session)
+      _credes_zfs_snapshot(:create,zfs,snapshot,session)
     end
 
     def destroy_zfs_snapshot(zfs,snapshot,session=nil)
-      _credes_zfs_snapshot(:destroy,snapshot,session)
+      _credes_zfs_snapshot(:destroy,zfs,snapshot,session)
     end
 
     def _credes_zfs_snapshot(credes,zfs,snapshot,session=nil)
@@ -343,20 +347,19 @@ module ZettaBee
       ec = nil
       eo = nil
       if session.nil? then
+        @log.debug "executing #{command}"
         pid, stdin, stdout, stderr = popen4("#{command}")
         ignored, status = Process::waitpid2 pid
-        stdoutbucket = stdout.readlines[0]
-        raise ZFSError, stdoutbucket.strip unless status.exitstatus == 0
+        raise ZFSError, stderr.read.strip unless status.exitstatus == 0
       else
         sessionchannel = session.open_channel do |channel|
-        @log.debug " starting SSH session channel to #{session.host}"
-          channel.exec "zfs snapshot #{zfs}@#{snapshot}" do |ch,chs|
-            @log.debug "  channel.exec(zfs snapshot #{zfs}@#{snapshot})"
+        @log.debug "  starting SSH session channel to #{session.host}"
+          channel.exec command do |ch,chs|
+            @log.debug "   channel.exec(zfs snapshot #{zfs}@#{snapshot})"
             if chs
-              @log.debug("  creating #{zfs}@#{snapshot} snapshot")
               channel.on_request "exit-status" do |ch, data|
                 ec = data.read_long
-                @log.debug "   exit-status received: #{ec}"
+                @log.debug "    exit-status received: #{ec}"
               end
               channel.on_extended_data do |ch,data|
                 eo = data
@@ -365,25 +368,25 @@ module ZettaBee
                 @log.debug "  channel closed"
               end
             else
-              raise SSHError, "unable to open SSH channel to #{session.host} to create snapshot #{snapshot}"
+              raise SSHError, "unable to open SSH channel to #{session.host} to #{credes.to_s} snapshot #{snapshot}"
             end
           end
         end
         sessionchannel.wait
         raise ZFSError, "unable to create remote snapshot #{session.host}:#{zfs}@#{snapshot}: #{eo}" unless ec == 0
-        @log.debug " successfully created remote snapshot #{session.host}:#{zfs}@#{snapshot}"
       end
     end
 
     def zfs_send(zfs,snapshot,zfssend_opts,dhost,port,session,skt)
+      ec = nil
       sessionchannel = session.open_channel do |channel|
-        @log.debug " starting SSH session channel to #{session.host}"
+        @log.debug "  starting SSH session channel to #{session.host}"
         channel.exec "zfs send #{zfssend_opts} #{zfs}@#{snapshot} | mbuffer -s 128k -m 500M -R 50M -O #{dhost}:#{port}" do |ch,chs|
-          @log.debug "  channel.exec(zfs send #{zfssend_opts} #{zfs}@#{snapshot} | mbuffer -s 128k -m 500M -R 50M -O #{dhost}:#{port})"
+          @log.debug "   channel.exec(zfs send #{zfssend_opts} #{zfs}@#{snapshot} | mbuffer -s 128k -m 500M -R 50M -O #{dhost}:#{port})"
           if chs
-            @log.debug " sending #{szfs}@#{snapshot}"
             channel.on_request "exit-status" do |ch, data|
              ec = data.read_long
+             @log.debug "   exit-status received: #{ec}"
             end
             channel.on_data do |ch, data|
               skt.send data
@@ -392,14 +395,15 @@ module ZettaBee
               skt.send data
             end
             channel.on_close do |ch|
+              @log.debug " channel closed"
             end
           else
-            raise SSHError, "unable to open channel to zfs send #{@shost}:#{@szfs}@#{nextsnapshot}"
+            raise SSHError, "unable to open channel to zfs send #{session.host}:#{zfs}@#{snapshot}"
           end
         end
       end
       sessionchannel.wait
-      raise ZFSError, "failed to zfs send #{@shost}:#{@szfs}@#{nextsnapshot}: #{stderr.readlines()}" unless ec == 0
+      raise ZFSError, "failed to zfs send #{session.host}:#{zfs}@#{snapshot}}" unless ec == 0
     end
 
 
@@ -444,14 +448,14 @@ module ZettaBee
         create_zfs_snapshot(@szfs,nextsnapshot,session)
 
         pid, stdin, stdout, stderr = popen4("mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@dzfs}")
-        @log.debug " launched 'mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@dzfs}' [pid #{pid}]"
+        @log.debug "  launched 'mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@dzfs}' [pid #{pid}]"
 
         sleep(30) # this sleep is intended to let zfs recv get ready
 
         zfs_send(@szfs,nextsnapshot,zfssend_opts,@dhost,@port,session,skt)
-        sleep(30) # this sleep is intended to let zfs recv wrap up its work _after_ the transfer is done
-
         ignored, status = Process::waitpid2 pid
+
+        raise ZFSError, stderr.read.strip unless status.exitstatus == 0
 
         setzfsproperty(@dzfs,LASTSNAP_ZFSP,nextsnapshot)
         setzfsproperty(@szfs,LASTSNAP_ZFSP,nextsnapshot,session)
@@ -463,7 +467,7 @@ module ZettaBee
 
         skt.close
         ctx.close
-        @log.info "#{@shost}:#{@szfs}@#{nextsnapshot} #{@dhost}:#{@dzfs} END"
+        @log.info "#{@shost}:#{@szfs}@#{nextsnapshot} #{mode.to_s.upcase} #{@dhost}:#{@dzfs} END"
       end
       unlock
     end

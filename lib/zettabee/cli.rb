@@ -125,7 +125,7 @@ module ZettaBee
           rescue ZettaBee::IsRunningInfo
             zfrs.execute(:status) unless @options.nagios
           rescue => e
-            $stderr.write "#{ME}: error: #{@action.to_s.upcase} #{zfrs.dhost}:#{zfrs.dzfs}: #{e.message}\n"
+            $stderr.write "#{ME}: error: #{@action.to_s.upcase} #{zfrs.dhost}:#{zfrs.dzfs}: #{e.message} (#{e.backtrace})\n"
             sn_rt = NAGIOS_UNKNOWN
             sn_svc_out += ": #{e.message}"
           ensure
