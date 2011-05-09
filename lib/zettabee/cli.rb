@@ -68,10 +68,10 @@ module ZettaBee
       end
 
       def process_options
-        ZettaBee.nagios = @options.nagios if @options.nagios
-        ZettaBee.debug = @options.debug if @options.debug
-        ZettaBee.verbose = @options.verbose if @options.verbose
-        ZettaBee.cfgfile = @options.cfgfile if @options.cfgfile
+        Worker.nagios = @options.nagios if @options.nagios
+        Worker.debug = @options.debug if @options.debug
+        Worker.verbose = @options.verbose if @options.verbose
+        Worker.cfgfile = @options.cfgfile if @options.cfgfile
       end
 
       def process_arguments
@@ -91,7 +91,7 @@ module ZettaBee
 
       def process_command
 
-        @zfsrs = ZettaBee.readconfig()
+        @zfsrs = Worker.readconfig()
         execzfsrs = []
 
 
@@ -122,7 +122,7 @@ module ZettaBee
 
           begin
             zfrs.execute(@action.to_sym)
-          rescue ZettaBee::IsRunningInfo
+          rescue Worker::IsRunningInfo
             zfrs.execute(:status) unless @options.nagios
           rescue => e
             $stderr.write "#{ME}: error: #{@action.to_s.upcase} #{zfrs.dhost}:#{zfrs.dzfs}: #{e.message} (#{e.backtrace})\n"
@@ -131,9 +131,9 @@ module ZettaBee
           ensure
             if @options.nagios then
               sn_svc_out += "#{zfrs.status} #{zfrs.lag(:string)}"
-              if zfrs.state == ZettaBee::STATE[:inconsistent] then # really need is_consistent? method
+              if zfrs.state == Worker::STATE[:inconsistent] then # really need is_consistent? method
                 sn_rt = NAGIOS_CRITICAL
-                sn_svc_out += ": state is #{ZettaBee::STATE[:inconsistent]}"
+                sn_svc_out += ": state is #{Worker::STATE[:inconsistent]}"
               elsif zfrs.lag >= zfrs.clag then
                 sn_rt = NAGIOS_CRITICAL
                 sn_svc_out += ": lag is CRITICAL"
