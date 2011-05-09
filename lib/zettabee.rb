@@ -421,7 +421,7 @@ module ZettaBee
       @log.add Log4r::FileOutputter.new("logfile", :filename => @logfile, :trunc => false, :formatter => Log4r::PatternFormatter.new(:pattern => "[%d] #{ZFIX}:%c [%p] %l %m"), :level => log4level)
       @log.add Log4r::StdoutOutputter.new('console', :formatter => Log4r::PatternFormatter.new(:pattern => "[%d] #{ZFIX}:%c [%p] %l %m"), :level => Log4r::DEBUG) if ZettaBee.verbose
 
-      nextsnapshot = "#{ZFIX}.#{Time.new.strftime('%Y%m%d%H%M%S%Z')}"
+      nextsnapshot = "#{ZFIX}.#{@dhost}.#{Time.new.strftime('%Y%m%d%H%M%S%Z')}"
       lastsnapshot = getzfsproperty(@dzfs,LASTSNAP_ZFSP)
 
       @log.info "#{@shost}:#{@szfs}@#{nextsnapshot} #{mode.to_s.upcase} #{@dhost}:#{@dzfs} START"
