@@ -27,11 +27,6 @@ module ZettaBee
 
     ZFIX = "zettabee"
 
-    LASTSNAP_ZFSP = "#{ZFIX}:lastsnap"
-    SOURCE_ZFSP = "#{ZFIX}:source"
-    TARGET_ZFSP = "#{ZFIX}:target"
-    CREATION_ZFSP = "creation"
-
     STATE = { :synchronized => "Synchronized", :uninitialized => "Uninitialized", :inconsistent => "Inconsistent!" }
     STATUS = { :idle => "Idle", :running => "Running", :initializing => "Initializing" }
 
@@ -86,7 +81,11 @@ module ZettaBee
       @lckfile = "/local/var/run/#{ZFIX}/#{@port}.lck"
       @fingerprint = Digest::MD5.hexdigest("#{@shost}:#{szfs}_#{@dhost}:#{@dzfs}")
 
-      @zfsproperties = { :source => "#{SOURCE_ZFSP}:#{@fingerprint}", :target => "#{TARGET_ZFSP}:#{@fingerprint}", :lastsnap => "#{LASTSNAP_ZFSP}:#{@fingerprint}", :creation => "creation" }
+      @zfsproperties = {  :source       => "#{ZFIX}:#{@fingerprint}:source",
+                          :destination  => "#{ZFIX}:#{@fingerprint}:destination",
+                          :lastsnap     => "#{ZFIX}:#{@fingerprint}:lastsnap",
+                          :creation     => "creation"
+      }
 
       @log = Log4r::Logger.new(@port)
     end
@@ -202,7 +201,7 @@ module ZettaBee
       if is_initialized? then
         STATE[:synchronized]
       else
-        if getzfsproperty(@dzfs,CREATION_ZFSP)
+        if getzfsproperty(@dzfs,@zfsproperties[:lastsnap])
           STATE[:inconsistent]
         else
           STATE[:uninitialized]
@@ -421,7 +420,7 @@ module ZettaBee
           raise StateError, "cannot initialize: #{@dzfs} already exists" if getzfsproperty(@dzfs,@zfsproperties[:creation])
           # check destination parent!
           zfssend_opts = ""
-          zfsrecv_opts = "-o #{@zfsproperties[:source]}='#{@shost}:#{@szfs}' -o #{@zfsproperties[:target]}='#{@dhost}:#{@dzfs}'"
+          zfsrecv_opts = "-o #{@zfsproperties[:source]}='#{@shost}:#{@szfs}' -o #{@zfsproperties[:destination]}='#{@dhost}:#{@dzfs}'"
         when :update then
           raise StateError, "cannot update: #{@dzfs} does not exists" unless getzfsproperty(@dzfs,@zfsproperties[:creation])
           raise StateError, "cannot update: #{lastsnapshot} snapshot does not exists" unless getzfsproperty("#{@dzfs}@#{lastsnapshot}",@zfsproperties[:creation])
@@ -434,6 +433,9 @@ module ZettaBee
 
       Net::SSH.start(@shost,'root',:port => @sshport,:keys => [ @sshkey ]) do |session|
         @log.debug " starting SSH session to #{@shost}"
+
+        setzfsproperty(@szfs,@zfsproperties[:source],"#{@shost}:#{@szfs}",session) if mode == :initialize
+        setzfsproperty(@szfs,@zfsproperties[:destination],"#{@dhost}:#{@dzfs}",session) if mode == :initialize
 
         create_zfs_snapshot(@szfs,nextsnapshot,session)
 
