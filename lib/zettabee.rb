@@ -15,7 +15,11 @@ require 'digest/md5'
 
 module ZettaBee
 
-  class Worker
+  class Set
+
+    include Enumerable
+
+    attr_accessor :pairs
 
     @debug = false
     @nagios = false
@@ -23,27 +27,16 @@ module ZettaBee
     @cfgfile = nil
     class << self; attr_accessor :debug, :nagios, :verbose, :cfgfile; end
 
-    attr_reader :shost, :szfs, :dhost, :dzfs, :transport, :port, :sshport, :sshkey, :clag, :wlag, :nagios_svc_description
-
-    ZFIX = "zettabee"
-
-    STATE = { :synchronized => "Synchronized", :uninitialized => "Uninitialized", :inconsistent => "Inconsistent!" }
-    STATUS = { :idle => "Idle", :running => "Running", :initializing => "Initializing" }
-
     class Error < StandardError; end
-    class SSHError < Error; end
-    class ZFSError < Error; end
     class ConfigurationError < Error; end
-    class LockError < Error; end
-    class StateError < Error; end
 
-    class Info < StandardError; end
-    class IsRunningInfo < Info; end
+    def initialize(cfgfile)
+      @pairs_by_port = {}
+      @pairs_by_destination = {}
+      @pairs = []
 
-    def Worker.readconfig()
       begin
-        zfsrs = {}
-        File.open(Worker.cfgfile,"r").readlines.each do |cfgline|
+        File.open(cfgfile,"r").readlines.each do |cfgline|
           cfgline.chomp!
           next if cfgline[0] == 35    # need to change in 1.9
           c = cfgline.split(/\s+/)
@@ -51,43 +44,94 @@ module ZettaBee
           dhost,dzfs = c[1].split(':')
           cfgoptions = {}
           c[2].split(',').each do |o|
-            cfgoptions[o.split('=')[0]] = o.split('=')[1]
+            cfgoptions[o.split('=')[0].to_sym] = o.split('=')[1]
           end
-          raise ConfigurationError, "duplicate destination in configuration file: #{dzfs}" if zfsrs.has_key?(dzfs)
-          zfsrs[dzfs] = Worker.new(shost,szfs,dhost,dzfs,cfgoptions)
+          cfgoptions[:log] =  Log4r::Logger.new(cfgoptions[:port])
+          cfgoptions[:log].add Log4r::StdoutOutputter.new('console', :formatter => Log4r::PatternFormatter.new(:pattern => "[%d] zettabee:%c [%p] %l %m"), :level => Log4r::DEBUG) if Set.verbose
+          pair = Pair.new(shost,szfs,dhost,dzfs,cfgoptions)
+
+          raise ConfigurationError, "duplicate destination in configuration file: #{dzfs}:#{cfgoptions[:port]}" if @pairs_by_destination.has_key?(dzfs)
+          raise ConfigurationError, "duplicate port in configuration file: #{dzfs}:#{cfgoptions[:port]}" if @pairs_by_port.has_key?(cfgoptions[:port])
+
+          @pairs_by_port[cfgoptions[:port]] = pair
+          @pairs_by_destination[dzfs] = pair
+          @pairs.push(pair)
         end
-        zfsrs
       rescue Errno::ENOENT => e
         $stderr.write "error: #{e.message}\n"
         exit 1
       end
     end
 
-    def initialize(shost,szfs,dhost,dzfs,cfgoptions=none)
+    def each &block
+      @pairs.each { |pair| block.call(pair) }
+    end
+
+    def pair_by_port(port)
+      @pairs_by_port.has_key?(port) ? @pairs_by_port[port] : nil
+    end
+
+    def pair_by_destination(destination)
+      @pairs_by_destination.has_key?(destination) ? @pairs_by_port[destination] : nil
+    end
+
+  end
+
+  class Pair
+
+    attr_reader :shost, :szfs, :dhost, :dzfs, :transport, :port, :sshport, :sshkey, :clag, :wlag, :nagios_svc_description, :logfile
+
+    ZFIX = "zettabee"
+
+    STATE =   { :synchronized => "Synchronized",
+                :uninitialized => "Uninitialized",
+                :inconsistent => "Inconsistent!"
+    }
+    STATUS =  { :idle => "Idle",
+                :running => "Running",
+                :initializing => "Initializing"
+    }
+
+    class Error < StandardError; end
+    class SSHError < Error; end
+    class ZFSError < Error; end
+    class ConfigurationError < Error; end
+    class LockError < Error; end
+    class StateError < Error; end
+    class ActionError < Error; end
+
+    class Info < StandardError; end
+    class IsRunningInfo < Info; end
+
+    def initialize(shost,szfs,dhost,dzfs,cfgoptions={})
       @shost = shost
       @szfs = szfs
       @dhost = dhost
       @dzfs = dzfs
-      @transport = cfgoptions['transport']
-      @port = cfgoptions['port']
-      @sshport = cfgoptions['sshport']
-      @sshkey = cfgoptions['sshkey']
-      @clag = cfgoptions['clag'].to_i
-      @wlag = cfgoptions['wlag'].to_i
+      @dzfsparent = File.dirname(dzfs)
+      @transport = cfgoptions[:transport]
+      @port = cfgoptions[:port]
+      @sshport = cfgoptions[:sshport]
+      @sshkey = cfgoptions[:sshkey]
+      @clag = cfgoptions[:clag].to_i
+      @wlag = cfgoptions[:wlag].to_i
+      @logfile = "/local/var/log/#{ZFIX}/#{@port}.log"
+      @log = cfgoptions[:log]
+      Set.debug ? log4level = Log4r::DEBUG : log4level = Log4r::INFO
+      @log.add Log4r::FileOutputter.new("logfile", :filename => @logfile, :trunc => false, :formatter => Log4r::PatternFormatter.new(:pattern => "[%d] #{ZFIX}:%c [%p] %l %m"), :level => log4level)
       @runstart = 0
       @nagios_svc_description = "service/#{ZFIX}:#{@dhost}:#{@port}"
-      @logfile = "/local/var/log/#{ZFIX}/#{@port}.log"
+
       @zmqsock = "/local/var/run/#{ZFIX}/#{@port}.zmq"
       @lckfile = "/local/var/run/#{ZFIX}/#{@port}.lck"
-      @fingerprint = Digest::MD5.hexdigest("#{@shost}:#{szfs}_#{@dhost}:#{@dzfs}")
+      @fingerprint = Digest::MD5.hexdigest("#{@shost}:#{szfs}::#{@dhost}:#{@dzfs}")
 
       @zfsproperties = {  :source       => "#{ZFIX}:#{@fingerprint}:source",
                           :destination  => "#{ZFIX}:#{@fingerprint}:destination",
                           :lastsnap     => "#{ZFIX}:#{@fingerprint}:lastsnap",
+                          :fingerprint  => "#{ZFIX}:fingerprint",
                           :creation     => "creation"
       }
-
-      @log = Log4r::Logger.new(@port)
     end
 
     def execute(action)
@@ -99,7 +143,7 @@ module ZettaBee
         when :update  then run(:update)
         when :setup then setup
         when :unlock then unlock
-        else $stderr.write "error: unknown action #{action}\n"
+        else raise ActionError, "unknown action #{action}"
       end
     end
 
@@ -113,7 +157,8 @@ module ZettaBee
         lbang = '!' if l > @clag
       end
       rh,rm,rs = runtime(:hms)
-      print Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d%s  %s:%d  %s (%d:%02d:%02d)\n",@shost.ljust(8),@szfs.ljust(45),@dhost.rjust(8),@dzfs.ljust(36),state.ljust(14),h,m,s,lbang,lastsnapshot.rjust(26),@port,status,rh,rm,rs)
+      zfs_exists? ? lss = lastsnapshot : lss = '-'
+      print Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d%s  %s:%d  %s (%d:%02d:%02d)\n",@shost.ljust(8),@szfs.ljust(45),@dhost.rjust(8),@dzfs.ljust(36),state.ljust(14),h,m,s,lbang,lss.rjust(26),@port,status,rh,rm,rs)
     end
 
     def lock
@@ -141,21 +186,6 @@ module ZettaBee
       end
     end
     
-    def is_locked?
-      File.exists?(@lckfile)
-    end
-
-    def is_running?
-      File.exists?(@zmqsock)
-    end
-
-    def is_initialized?
-      lastsnapshot = getzfsproperty(@dzfs,@zfsproperties[:lastsnap])
-      lastsnapshot_creation = getzfsproperty("#{@dzfs}@#{lastsnapshot}",@zfsproperties[:creation])
-
-      lastsnapshot_creation ? true : false 
-    end
-    
     def lastsnapshot
       l = getzfsproperty(@dzfs,@zfsproperties[:lastsnap])
       l.nil? ? '-' : l
@@ -164,7 +194,7 @@ module ZettaBee
     def lag(mode=nil)
       h,m,s = 0,0,0
       seconds = 0
-      if is_initialized? then
+      if zfs_exists? and is_synchronized? then
         lastsnapshot = getzfsproperty(@dzfs,@zfsproperties[:lastsnap])
         lastsnapshot_creation = getzfsproperty("#{@dzfs}@#{lastsnapshot}",@zfsproperties[:creation])
         dt_delta = DateTime.now - DateTime.parse(lastsnapshot_creation)
@@ -197,21 +227,68 @@ module ZettaBee
       end
     end
 
+    def is_locked?
+      File.exists?(@lckfile)
+    end
+
+    def is_running?
+      File.exists?(@zmqsock)
+    end
+
+    def is_consistent?
+      consistency = false
+      fingerprint = getzfsproperty(@dzfs,@zfsproperties[:fingerprint])
+
+      if @fingerprint ==  getzfsproperty(@dzfs,@zfsproperties[:fingerprint]) then
+        lastsnapshot = getzfsproperty(@dzfs,@zfsproperties[:lastsnap])
+        consistency = true if getzfsproperty("#{@dzfs}@#{lastsnapshot}",@zfsproperties[:creation])
+      end
+
+      consistency
+    end
+
+    def zfs_exists?
+      s = false
+
+      begin
+        getzfsproperty(@dzfs,@zfsproperties[:creation])
+        s = true
+      rescue ZFSError => e
+        raise unless e.message.include?("dataset does not exist")
+      end
+
+      s
+    end
+
+    def is_synchronized?
+
+      s = false
+
+      begin
+        fingerprint = getzfsproperty(@dzfs,@zfsproperties[:fingerprint])
+        if @fingerprint == fingerprint then
+          lastsnapshot = getzfsproperty(@dzfs,@zfsproperties[:lastsnap])
+          lastsnapshot_creation = getzfsproperty("#{@dzfs}@#{lastsnapshot}",@zfsproperties[:creation])
+          lastsnapshot_creation ? s = true : s = false
+        end
+      rescue ZFSError => e
+        raise unless e.message.include?("dataset does not exist")
+      end
+
+      s
+    end
+
     def state
-      if is_initialized? then
+      if zfs_exists? and is_synchronized? then
         STATE[:synchronized]
       else
-        if getzfsproperty(@dzfs,@zfsproperties[:lastsnap])
-          STATE[:inconsistent]
-        else
-          STATE[:uninitialized]
-        end
+        zfs_exists? ? STATE[:inconsistent] : STATE[:uninitialized]
       end
     end
 
     def status
       s = '-'
-      if is_initialized? then
+      if zfs_exists? and is_synchronized? then
         is_running? ? s = STATUS[:running] : s = STATUS[:idle]
       else
         is_running? ? s = STATUS[:initializing] : s = STATUS[:idle]
@@ -266,11 +343,18 @@ module ZettaBee
 
       begin
         if session.nil?
+          out = nil
+          err = nil
           pstatus = popen4(zfscommand) do |pid, pstdin, pstdout, pstderr|
-            out = pstdout.read.strip
+            o = pstdout.readlines[0]
+            out = o.strip unless o.nil?
+            e = pstderr.readlines[0]
+            err = e.strip unless e.nil?
             zfspropval = out unless out == '-'
           end
-          pstatus.exitstatus == 0 ? zfspropval : nil
+          if pstatus.exitstatus != 0 then
+            raise ZFSError, "#{err}"
+          end
         else
           ec = nil
           sessionchannel = session.open_channel do |channel|
@@ -288,9 +372,9 @@ module ZettaBee
             end
           end
           sessionchannel.wait
-          ec == 0 ? zfspropval : nil
         end
       end
+      zfspropval
     end
 
     def setzfsproperty(zfsfs,key,value,session=nil)
@@ -305,13 +389,7 @@ module ZettaBee
       "ipc://#{@zmqsock}"
     end
 
-    def log4level
-      if Worker.debug
-        Log4r::DEBUG
-      else
-        Log4r::INFO
-      end
-    end
+
 
 
 
@@ -406,9 +484,6 @@ module ZettaBee
       skt.bind statuszocket
 
       @runstart = DateTime.parse(File.ctime(@zmqsock).to_s)
-      
-      @log.add Log4r::FileOutputter.new("logfile", :filename => @logfile, :trunc => false, :formatter => Log4r::PatternFormatter.new(:pattern => "[%d] #{ZFIX}:%c [%p] %l %m"), :level => log4level)
-      @log.add Log4r::StdoutOutputter.new('console', :formatter => Log4r::PatternFormatter.new(:pattern => "[%d] #{ZFIX}:%c [%p] %l %m"), :level => Log4r::DEBUG) if Worker.verbose
 
       nextsnapshot = "#{ZFIX}.#{@fingerprint}.#{Time.new.strftime('%Y%m%d%H%M%S%Z')}"
       lastsnapshot = getzfsproperty(@dzfs,@zfsproperties[:lastsnap])
@@ -427,7 +502,7 @@ module ZettaBee
           raise StateError, "error: cannot update: cannot determine #{@dzfs}:#{@zfsproperties[:lastsnap]} property" unless lastsnapshot
           zfssend_opts = "-i #{lastsnapshot}"
         else
-          raise Error, "invalid mode"
+          raise Error, "invalid mode #{mode}"
       end
       @log.debug " mode: #{mode.to_s}; zfs send options: '#{zfssend_opts}'; zfs recv options: '#{zfsrecv_opts}'"
 
@@ -449,6 +524,7 @@ module ZettaBee
 
         raise ZFSError, stderr.read.strip unless status.exitstatus == 0
 
+        setzfsproperty(@dzfs,@zfsproperties[:fingerprint],@fingerprint) if mode == :initialize
         setzfsproperty(@dzfs,@zfsproperties[:lastsnap],nextsnapshot)
         setzfsproperty(@szfs,@zfsproperties[:lastsnap],nextsnapshot,session)
 

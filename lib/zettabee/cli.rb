@@ -2,6 +2,7 @@ require 'rubygems'
 require 'optparse'
 require 'ostruct'
 require 'date'
+require 'log4r'
 require 'yaml'
 
 module ZettaBee
@@ -22,13 +23,15 @@ module ZettaBee
       @options = OpenStruct.new
 
       # defaults
+      @options.ymlfile = "/local/etc/zettabee/zettabee.yml"
       @options.cfgfile = "/local/etc/zettabee/zettabee.cfg"
       @options.debug = false
       @options.nagios = false
       @options.verbose = false
       @action = nil
       @destination = nil
-      @zfsrs = {}
+      @pairs = {}
+
     end
 
     def run
@@ -68,10 +71,10 @@ module ZettaBee
       end
 
       def process_options
-        Worker.nagios = @options.nagios if @options.nagios
-        Worker.debug = @options.debug if @options.debug
-        Worker.verbose = @options.verbose if @options.verbose
-        Worker.cfgfile = @options.cfgfile if @options.cfgfile
+        Set.nagios = @options.nagios if @options.nagios
+        Set.debug = @options.debug if @options.debug
+        Set.cfgfile = @options.cfgfile if @options.cfgfile
+        Set.verbose = @options.verbose if @options.verbose
       end
 
       def process_arguments
@@ -91,53 +94,57 @@ module ZettaBee
 
       def process_command
 
-        @zfsrs = Worker.readconfig()
-        execzfsrs = []
-
-
+        begin
+          @zettabees = Set.new(@options.cfgfile)
+          execpairs = []
+        rescue Set::ConfigurationError => e
+          $stderr.write "#{ME}: error: #{e.message}\n"
+          exit 1
+        end
+        
         if @destination then
           # a destination can be fully specified (a/b/c) or using the last component (c)
           if @destination.split('/').length > 1
-            execzfsrs.push(@zfsrs[@destination])
+            execpairs.push(@zettabees.pair_by_destination[@destination])
           elsif @destination.split('/').length == 1
-            @zfsrs.each_key do |key|
-              if key.split('/')[-1] == @destination
-                execzfsrs.push(@zfsrs[key])
+            @zettabees.each do |pair|
+              if pair.dzfs.split('/')[-1] == @destination
+                execpairs.push(pair)
               end
             end
           end
-          abort "error: invalid destination: #{@destination}" unless execzfsrs.length == 1
+          abort "error: invalid destination: #{@destination}" unless execpairs.length == 1
         else
           if @action == "status"
-            @zfsrs.each_value { |zfsr| execzfsrs.push(zfsr) }
+            @zettabees.each { |pair| execpairs.push(pair) }
           else
             abort "error: only status action can be run against all destinations"
           end
         end
 
-        execzfsrs.each do |zfrs|
-          sn = NSCA.new(@options.nagios,zfrs.dhost,zfrs.nagios_svc_description)
+        execpairs.each do |pair|
+          sn = NSCA.new(@options.nagios,pair.dhost,pair.nagios_svc_description)
           sn_rt = NAGIOS_OK
-          sn_svc_out = "#{@action.to_s.upcase} #{zfrs.dhost}:#{zfrs.dzfs}: "
+          sn_svc_out = "#{@action.to_s.upcase} #{pair.dhost}:#{pair.dzfs}: #{Time.now.to_s}: "
 
           begin
-            zfrs.execute(@action.to_sym)
-          rescue Worker::IsRunningInfo
-            zfrs.execute(:status) unless @options.nagios
+            pair.execute(@action.to_sym)
+          rescue Pair::IsRunningInfo
+            pair.execute(:status) unless @options.nagios
           rescue => e
-            $stderr.write "#{ME}: error: #{@action.to_s.upcase} #{zfrs.dhost}:#{zfrs.dzfs}: #{e.message} (#{e.backtrace})\n"
+            $stderr.write "#{ME}: error: #{@action.to_s.upcase} #{pair.dhost}:#{pair.dzfs}: #{e.message} (#{e.backtrace})\n"
             sn_rt = NAGIOS_UNKNOWN
-            sn_svc_out += ": #{e.message}"
+            sn_svc_out += ": #{Time.now.to_s}: #{e.message}"
           ensure
             if @options.nagios then
-              sn_svc_out += "#{zfrs.status} #{zfrs.lag(:string)}"
-              if zfrs.state == Worker::STATE[:inconsistent] then # really need is_consistent? method
+              sn_svc_out += "#{pair.status} #{pair.lag(:string)}"
+              if pair.state == Pair::STATE[:inconsistent] then # really need is_consistent? method
                 sn_rt = NAGIOS_CRITICAL
-                sn_svc_out += ": state is #{Worker::STATE[:inconsistent]}"
-              elsif zfrs.lag >= zfrs.clag then
+                sn_svc_out += ": state is #{Pair::STATE[:inconsistent]}"
+              elsif pair.lag >= pair.clag then
                 sn_rt = NAGIOS_CRITICAL
                 sn_svc_out += ": lag is CRITICAL"
-              elsif zfrs.lag >= zfrs.wlag then
+              elsif pair.lag >= pair.wlag then
                 sn_rt = NAGIOS_WARNING
                 sn_svc_out += ": lag is WARNING"
               else
