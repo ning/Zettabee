@@ -12,6 +12,7 @@ require 'log4r'
 require 'yaml'
 require 'fileutils'
 require 'digest/md5'
+require 'zettabee/zfs'
 
 module ZettaBee
 
@@ -77,6 +78,43 @@ module ZettaBee
 
   end
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   class Pair
 
     attr_reader :shost, :szfs, :dhost, :dzfs, :transport, :port, :sshport, :sshkey, :clag, :wlag, :nagios_svc_description, :logfile
@@ -103,12 +141,16 @@ module ZettaBee
     class Info < StandardError; end
     class IsRunningInfo < Info; end
 
+
+
+
     def initialize(shost,szfs,dhost,dzfs,cfgoptions={})
       @shost = shost
       @szfs = szfs
       @dhost = dhost
       @dzfs = dzfs
-      @dzfsparent = File.dirname(dzfs)
+
+
       @transport = cfgoptions[:transport]
       @port = cfgoptions[:port]
       @sshport = cfgoptions[:sshport]
@@ -132,6 +174,12 @@ module ZettaBee
                           :fingerprint  => "#{ZFIX}:fingerprint",
                           :creation     => "creation"
       }
+      
+      @source = ZFS::Dataset.new(szfs,shost)
+      @destination = ZFS::Dataset.new(dzfs)
+
+      @lastsnap2 = ZFS::Dataset.new("#{@destination.name}@#{@destination.get(@zfsproperties[:lastsnap])}")
+
     end
 
     def execute(action)
@@ -157,7 +205,7 @@ module ZettaBee
         lbang = '!' if l > @clag
       end
       rh,rm,rs = runtime(:hms)
-      zfs_exists? ? lss = lastsnapshot : lss = '-'
+      @destination.exists? ? lss = lastsnapshot : lss = '-'
       print Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d%s  %s:%d  %s (%d:%02d:%02d)\n",@shost.ljust(8),@szfs.ljust(45),@dhost.rjust(8),@dzfs.ljust(36),state.ljust(14),h,m,s,lbang,lss.rjust(26),@port,status,rh,rm,rs)
     end
 
@@ -169,7 +217,7 @@ module ZettaBee
         if is_running? then
           raise IsRunningInfo
         else
-          raise LockError, "#{@dzfs}:#{@port} lock file exists, but no transfer appears to be running"
+          raise LockError, "#{@destination.name}:#{@port} lock file exists, but no transfer appears to be running"
         end
       end
     end
@@ -187,16 +235,15 @@ module ZettaBee
     end
     
     def lastsnapshot
-      l = getzfsproperty(@dzfs,@zfsproperties[:lastsnap])
+      l = @destination.get(@zfsproperties[:lastsnap])
       l.nil? ? '-' : l
     end
 
     def lag(mode=nil)
       h,m,s = 0,0,0
       seconds = 0
-      if zfs_exists? and is_synchronized? then
-        lastsnapshot = getzfsproperty(@dzfs,@zfsproperties[:lastsnap])
-        lastsnapshot_creation = getzfsproperty("#{@dzfs}@#{lastsnapshot}",@zfsproperties[:creation])
+      if @destination.exists? and is_synchronized? and @lastsnap2.exists? then
+        lastsnapshot_creation = @lastsnap2.get(@zfsproperties[:creation])
         dt_delta = DateTime.now - DateTime.parse(lastsnapshot_creation)
         h,m,s,f = DateTime.day_fraction_to_time(dt_delta)
         seconds = h * 60 * 60 + m * 60 + s
@@ -237,27 +284,13 @@ module ZettaBee
 
     def is_consistent?
       consistency = false
-      fingerprint = getzfsproperty(@dzfs,@zfsproperties[:fingerprint])
+      fingerprint = @destination.get(@zfsproperties[:fingerprint])
 
-      if @fingerprint ==  getzfsproperty(@dzfs,@zfsproperties[:fingerprint]) then
-        lastsnapshot = getzfsproperty(@dzfs,@zfsproperties[:lastsnap])
-        consistency = true if getzfsproperty("#{@dzfs}@#{lastsnapshot}",@zfsproperties[:creation])
+      if @fingerprint ==  fingerprint then
+        consistency = true if @lastsnap2.get(@zfsproperties[:creation])
       end
 
       consistency
-    end
-
-    def zfs_exists?
-      s = false
-
-      begin
-        getzfsproperty(@dzfs,@zfsproperties[:creation])
-        s = true
-      rescue ZFSError => e
-        raise unless e.message.include?("dataset does not exist")
-      end
-
-      s
     end
 
     def is_synchronized?
@@ -265,30 +298,39 @@ module ZettaBee
       s = false
 
       begin
-        fingerprint = getzfsproperty(@dzfs,@zfsproperties[:fingerprint])
-        if @fingerprint == fingerprint then
-          lastsnapshot = getzfsproperty(@dzfs,@zfsproperties[:lastsnap])
-          lastsnapshot_creation = getzfsproperty("#{@dzfs}@#{lastsnapshot}",@zfsproperties[:creation])
-          lastsnapshot_creation ? s = true : s = false
+        if @destination.exists? then
+          if @lastsnap2.exists? then
+            if @fingerprint == @destination.get(@zfsproperties[:fingerprint])
+              s = true
+            else
+              raise StateError
+            end
+          else
+            raise StateError
+          end
         end
-      rescue ZFSError => e
-        raise unless e.message.include?("dataset does not exist")
+      rescue ZFSError
+        raise # unless e.message.include?("dataset does not exist")
       end
 
       s
     end
 
     def state
-      if zfs_exists? and is_synchronized? then
-        STATE[:synchronized]
-      else
-        zfs_exists? ? STATE[:inconsistent] : STATE[:uninitialized]
+      begin
+        if is_synchronized? then
+          STATE[:synchronized]
+        else
+          STATE[:uninitialized]
+        end
+      rescue StateError
+        STATE[:inconsistent]
       end
     end
 
     def status
       s = '-'
-      if zfs_exists? and is_synchronized? then
+      if @destination.exists? and is_synchronized? then
         is_running? ? s = STATUS[:running] : s = STATUS[:idle]
       else
         is_running? ? s = STATUS[:initializing] : s = STATUS[:idle]
@@ -475,6 +517,11 @@ module ZettaBee
 
 
 
+
+
+
+
+
     def run(mode)
 
       lock
@@ -486,21 +533,17 @@ module ZettaBee
       @runstart = DateTime.parse(File.ctime(@zmqsock).to_s)
 
       nextsnapshot = "#{ZFIX}.#{@fingerprint}.#{Time.new.strftime('%Y%m%d%H%M%S%Z')}"
-      lastsnapshot = getzfsproperty(@dzfs,@zfsproperties[:lastsnap])
 
       @log.info "#{@shost}:#{@szfs}@#{nextsnapshot} #{mode.to_s.upcase} #{@dhost}:#{@dzfs} START [#{@fingerprint}]"
 
       case mode
         when :initialize then
-          raise StateError, "cannot initialize: #{@dzfs} already exists" if getzfsproperty(@dzfs,@zfsproperties[:creation])
-          # check destination parent!
+          raise StateError if is_synchronized?
           zfssend_opts = ""
-          zfsrecv_opts = "-o #{@zfsproperties[:source]}='#{@shost}:#{@szfs}' -o #{@zfsproperties[:destination]}='#{@dhost}:#{@dzfs}'"
+          zfsrecv_opts = "-o #{@zfsproperties[:source]}='#{@shost}:#{@szfs}' -o #{@zfsproperties[:destination]}='#{@dhost}:#{@destination.name}'"
         when :update then
-          raise StateError, "cannot update: #{@dzfs} does not exists" unless getzfsproperty(@dzfs,@zfsproperties[:creation])
-          raise StateError, "cannot update: #{lastsnapshot} snapshot does not exists" unless getzfsproperty("#{@dzfs}@#{lastsnapshot}",@zfsproperties[:creation])
-          raise StateError, "error: cannot update: cannot determine #{@dzfs}:#{@zfsproperties[:lastsnap]} property" unless lastsnapshot
-          zfssend_opts = "-i #{lastsnapshot}"
+          raise StateError unless is_synchronized?
+          zfssend_opts = "-i #{@lastsnap2.snapshot_name}"
         else
           raise Error, "invalid mode #{mode}"
       end
@@ -517,20 +560,20 @@ module ZettaBee
         pid, stdin, stdout, stderr = popen4("mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@dzfs}")
         @log.debug "  launched 'mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@dzfs}' [pid #{pid}]"
 
-        sleep(30) # this sleep is intended to let zfs recv get ready
+        sleep(15) # this sleep is intended to let zfs recv get ready
 
         zfs_send(@szfs,nextsnapshot,zfssend_opts,@dhost,@port,session,skt)
         ignored, status = Process::waitpid2 pid
 
         raise ZFSError, stderr.read.strip unless status.exitstatus == 0
 
-        setzfsproperty(@dzfs,@zfsproperties[:fingerprint],@fingerprint) if mode == :initialize
-        setzfsproperty(@dzfs,@zfsproperties[:lastsnap],nextsnapshot)
+        @destination.set(@zfsproperties[:fingerprint],@fingerprint) if mode == :initialize
+        @destination.set(@zfsproperties[:lastsnap],nextsnapshot)
         setzfsproperty(@szfs,@zfsproperties[:lastsnap],nextsnapshot,session)
 
         if mode == :update
-          destroy_zfs_snapshot(@szfs,lastsnapshot,session)
-          destroy_zfs_snapshot(@dzfs,lastsnapshot)
+          destroy_zfs_snapshot(@szfs,@lastsnap2.snapshot_name,session)
+          @lastsnap2.destroy
         end
 
         skt.close
