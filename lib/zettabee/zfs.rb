@@ -39,13 +39,13 @@ module ZettaBee
       end
 
       def get(property,session=nil)
-        zfscommand = "zfs get -H -o value #{property} #{@name}"
+        zfscommand = "zfs get -H -o value #{property.to_s} #{@name}"
         value,err = zfs(zfscommand,session)
         value
       end
 
       def set(property,value,session=nil)
-        zfscommand = "zfs set #{property}=#{value} #{@name}"
+        zfscommand = "zfs set #{property.to_s}=#{value.to_s} #{@name}"
         zfs(zfscommand,session)
       end
 

@@ -1,3 +1,3 @@
 module ZettaBee
-  VERSION = "0.6.9.40"
+  VERSION = "0.6.10.0"
 end

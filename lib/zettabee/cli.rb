@@ -115,10 +115,10 @@ module ZettaBee
           end
           abort "error: invalid destination: #{@destination}" unless execpairs.length == 1
         else
-          if @action == "status"
+          if ["status","fingerprint"].include?(@action) then
             @zettabees.each { |pair| execpairs.push(pair) }
           else
-            abort "error: only status action can be run against all destinations"
+            abort "error: only status, fingerprint actions can be run against all destinations"
           end
         end
 
@@ -132,7 +132,8 @@ module ZettaBee
           rescue Pair::IsRunningInfo
             pair.execute(:status) unless @options.nagios
           rescue => e
-            $stderr.write "#{ME}: error: #{@action.to_s.upcase} #{pair.dhost}:#{pair.dzfs}: #{e.message} (#{e.backtrace})\n"
+            #$stderr.write "#{ME}: error: #{@action.to_s.upcase} #{pair.dhost}:#{pair.dzfs}: #{e.message} (#{e.backtrace})\n"
+            $stderr.write "#{ME}: error: #{@action.to_s.upcase} #{pair.dhost}:#{pair.dzfs}: #{e.message}\n"
             sn_rt = NAGIOS_UNKNOWN
             sn_svc_out += ": #{Time.now.to_s}: #{e.message}"
           ensure

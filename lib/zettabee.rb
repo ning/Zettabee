@@ -121,13 +121,13 @@ module ZettaBee
 
     ZFIX = "zettabee"
 
-    STATE =   { :synchronized => "Synchronized",
-                :uninitialized => "Uninitialized",
-                :inconsistent => "Inconsistent!"
+    STATE =   { :synchronized   => "Synchronized",
+                :uninitialized  => "Uninitialized",
+                :inconsistent   => "Inconsistent!"
     }
-    STATUS =  { :idle => "Idle",
-                :running => "Running",
-                :initializing => "Initializing"
+    STATUS =  { :idle           => "Idle",
+                :running        => "Running",
+                :initializing   => "Initializing"
     }
 
     class Error < StandardError; end
@@ -141,15 +141,11 @@ module ZettaBee
     class Info < StandardError; end
     class IsRunningInfo < Info; end
 
-
-
-
     def initialize(shost,szfs,dhost,dzfs,cfgoptions={})
       @shost = shost
       @szfs = szfs
       @dhost = dhost
       @dzfs = dzfs
-
 
       @transport = cfgoptions[:transport]
       @port = cfgoptions[:port]
@@ -157,24 +153,23 @@ module ZettaBee
       @sshkey = cfgoptions[:sshkey]
       @clag = cfgoptions[:clag].to_i
       @wlag = cfgoptions[:wlag].to_i
-      @logfile = "/local/var/log/#{ZFIX}/#{@port}.log"
-      @log = cfgoptions[:log]
-      Set.debug ? log4level = Log4r::DEBUG : log4level = Log4r::INFO
-      @log.add Log4r::FileOutputter.new("logfile", :filename => @logfile, :trunc => false, :formatter => Log4r::PatternFormatter.new(:pattern => "[%d] #{ZFIX}:%c [%p] %l %m"), :level => log4level)
-      @runstart = 0
-      @nagios_svc_description = "service/#{ZFIX}:#{@dhost}:#{@port}"
 
-      @zmqsock = "/local/var/run/#{ZFIX}/#{@port}.zmq"
-      @lckfile = "/local/var/run/#{ZFIX}/#{@port}.lck"
-      @fingerprint = Digest::MD5.hexdigest("#{@shost}:#{szfs}::#{@dhost}:#{@dzfs}")
+      # ---------------------------------------------------------------------------
+
+      @fingerprint_s = "#{shost}:#{szfs}::#{dhost}:#{dzfs}"
+      @fingerprint = Digest::MD5.hexdigest(@fingerprint_s)
 
       @zfsproperties = {  :source       => "#{ZFIX}:#{@fingerprint}:source",
                           :destination  => "#{ZFIX}:#{@fingerprint}:destination",
                           :lastsnap     => "#{ZFIX}:#{@fingerprint}:lastsnap",
-                          :fingerprint  => "#{ZFIX}:fingerprint",
-                          :creation     => "creation"
+                          :fingerprint  => "#{ZFIX}:fingerprint"
       }
-      
+
+      @zmqsock = "/local/var/run/#{ZFIX}/#{@fingerprint}.zmq"
+      @lckfile = "/local/var/run/#{ZFIX}/#{@fingerprint}.lck"
+      @logfile = "/local/var/log/#{ZFIX}/#{@fingerprint}.log"
+      @log = cfgoptions[:log]
+
       @source = ZFS::Dataset.new(szfs,shost, :log => @log)
       @destination = ZFS::Dataset.new(dzfs,dhost, :log => @log)
       @source_lastsnap = nil
@@ -188,6 +183,12 @@ module ZettaBee
         raise unless e.message.include?("dataset does not exist")
       end
 
+      Set.debug ? log4level = Log4r::DEBUG : log4level = Log4r::INFO
+      @log.add Log4r::FileOutputter.new("logfile", :filename => @logfile, :trunc => false, :formatter => Log4r::PatternFormatter.new(:pattern => "[%d] #{ZFIX}:%c [%p] %l %m"), :level => log4level)
+      @nagios_svc_description = "service/#{ZFIX}:#{@fingerprint}"
+
+      @runstart = 0
+      
     end
 
     def execute(action)
@@ -195,6 +196,8 @@ module ZettaBee
         when :setup then setup
         when :status then output_status
         when :runstatus then runstatus
+        when :fingerprint then output_fingerprint
+        when :logfile then output_logfile
         when :initialize then run(:initialize)
         when :update  then run(:update)
         when :setup then setup
@@ -218,6 +221,14 @@ module ZettaBee
       print Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d%s  %s (%d:%02d:%02d)\n",@shost.ljust(8),@szfs.ljust(45),@dhost.rjust(8),@dzfs.ljust(36),state.ljust(14),h,m,s,lbang,status,rh,rm,rs)
     end
 
+    def output_fingerprint
+      print Kernel.sprintf("%s:%s  %s:%s  %s\n",@source.host.ljust(8),@source.name.ljust(45),@destination.host.rjust(8),@destination.name.ljust(36),@fingerprint)
+    end
+
+    def output_logfile
+      puts @logfile
+    end
+    
     def lock
       begin
         FileUtils.mkdir(@lckfile)
@@ -252,7 +263,7 @@ module ZettaBee
       h,m,s = 0,0,0
       seconds = 0
       if is_synchronized? then
-        lastsnapshot_creation = @destination_lastsnap.get(@zfsproperties[:creation])
+        lastsnapshot_creation = @destination_lastsnap.get(:creation)
         dt_delta = DateTime.now - DateTime.parse(lastsnapshot_creation)
         h,m,s,f = DateTime.day_fraction_to_time(dt_delta)
         seconds = h * 60 * 60 + m * 60 + s
@@ -296,7 +307,7 @@ module ZettaBee
       fingerprint = @destination.get(@zfsproperties[:fingerprint])
 
       if @fingerprint ==  fingerprint then
-        consistency = true if @destination_lastsnap.get(@zfsproperties[:creation])
+        consistency = true if @destination_lastsnap.get(:creation)
       end
 
       consistency
@@ -375,7 +386,7 @@ module ZettaBee
         end
         STDOUT.sync = false
       else
-        $stderr.write "#{@dhost}:#{dzfs} currently not running\n"
+        $stderr.write "#{@destination.host}:#{@destination.name} currently not running\n"
       end
     end
 
