@@ -108,7 +108,7 @@ module ZettaBee
             execpairs.push(@zettabees.pair_by_destination[@destination])
           elsif @destination.split('/').length == 1
             @zettabees.each do |pair|
-              if pair.dzfs.split('/')[-1] == @destination
+              if pair.destination.name.split('/')[-1] == @destination
                 execpairs.push(pair)
               end
             end
@@ -123,9 +123,9 @@ module ZettaBee
         end
 
         execpairs.each do |pair|
-          sn = NSCA.new(@options.nagios,pair.dhost,pair.nagios_svc_description)
+          sn = NSCA.new(@options.nagios,pair.destination.host,pair.nagios_svc_description)
           sn_rt = NAGIOS_OK
-          sn_svc_out = "#{@action.to_s.upcase} #{pair.dhost}:#{pair.dzfs}: #{Time.now.to_s}: "
+          sn_svc_out = "#{@action.to_s.upcase} #{pair.destination}: #{Time.now.to_s}: "
 
           begin
             pair.execute(@action.to_sym)
@@ -133,7 +133,7 @@ module ZettaBee
             pair.execute(:status) unless @options.nagios
           rescue => e
             #$stderr.write "#{ME}: error: #{@action.to_s.upcase} #{pair.dhost}:#{pair.dzfs}: #{e.message} (#{e.backtrace})\n"
-            $stderr.write "#{ME}: error: #{@action.to_s.upcase} #{pair.dhost}:#{pair.dzfs}: #{e.message}\n"
+            $stderr.write "#{ME}: error: #{@action.to_s.upcase} #{pair.destination}: #{e.message}\n"
             sn_rt = NAGIOS_UNKNOWN
             sn_svc_out += ": #{Time.now.to_s}: #{e.message}"
           ensure

@@ -59,15 +59,38 @@ module ZettaBee
         zfs(zfscommand,session)
       end
 
-      def exists?
-        s = false
-        begin
-          self.get("creation")
-          s = true
-        rescue ZFSError => e
-          raise unless e.message.include?("dataset does not exist")
+      def send(args)
+        session = args[:session]
+        pipe = args[:pipe]
+        skt = args[:zmqsocket]
+        options = args[:options]
+        ec = nil
+        sessionchannel = session.open_channel do |channel|
+          zfscommand = "zfs send #{options} #{@name}"
+          zfscommand += " | #{pipe}" unless pipe.nil?
+          @log.debug "  starting SSH session channel to #{session.host}"
+          channel.exec zfscommand do |ch,chs|
+            @log.debug "   channel.exec(#{zfscommand}"
+            if chs
+              channel.on_request "exit-status" do |ch, data|
+               ec = data.read_long
+              end
+              channel.on_data do |ch, data|
+                skt.send data
+              end
+              channel.on_extended_data do |ch, type, data|
+                skt.send data
+              end
+              channel.on_close do |ch|
+                @log.debug " channel closed"
+              end
+            else
+              raise SSHError, "unable to open channel to #{session.host} to exec #{zfscommand}"
+            end
+          end
         end
-        s
+        sessionchannel.wait
+        raise ZFSError, "failed to zfs send #{@name}" unless ec == 0
       end
 
       def zfs(command,session=nil)
@@ -111,6 +134,18 @@ module ZettaBee
         end
         return out,err
       end
+
+      def exists?
+        s = false
+        begin
+          self.get("creation")
+          s = true
+        rescue ZFSError => e
+          raise unless e.message.include?("dataset does not exist")
+        end
+        s
+      end
+
     end
   end
 end
