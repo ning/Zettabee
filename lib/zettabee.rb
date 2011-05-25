@@ -388,6 +388,37 @@ module ZettaBee
       end
     end
 
+    def runstatus_thr(interval=0)
+      interrupted = false
+      trap("INT") { interrupted = true }
+      if is_running? then
+        ctx = ZMQ::Context.new
+        skt = ctx.socket(ZMQ::SUB)
+        skt.connect statuszocket
+        skt.setsockopt(ZMQ::SUBSCRIBE, '')
+        STDOUT.sync = true
+        begin
+          loop do
+            if interrupted
+              skt.close
+              ctx.close
+              exit 0
+            else
+              skt.recv
+            end
+          end
+        rescue RuntimeError
+              $stdout.write "\n"
+              skt.close
+              ctx.close
+              exit 0
+        end
+        STDOUT.sync = false
+      else
+        raise Error, "currently not running"
+      end
+    end
+
     def setup(rundir="/local/var/run/#{ZFIX}",logdir="/local/var/log/#{ZFIX}",cfgdir="/local/etc/#{ZFIX}")
       FileUtils.mkdir_p(rundir)
       FileUtils.mkdir_p(logdir)
@@ -405,6 +436,8 @@ module ZettaBee
       ctx = ZMQ::Context.new()
       skt = ctx.socket(ZMQ::PUB)
       skt.bind statuszocket
+
+      monitor = Thread.new(runstatus_thr)
 
       @runstart = DateTime.parse(File.ctime(@zmqsock).to_s)
 
@@ -457,6 +490,8 @@ module ZettaBee
 
         skt.close
         ctx.close
+        puts monitor.value
+        monitor.kill
         @log.info "#{@source.host}:#{nextsnapshot.name} #{mode.to_s.upcase} #{@destination.host}:#{@destination.name} END"
       end
       unlock
