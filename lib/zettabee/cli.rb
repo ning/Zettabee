@@ -129,16 +129,9 @@ module ZettaBee
 
           begin
             pair.execute(@action.to_sym)
+            sn_svc_out += ": #{pair.mbuffer_summary}: OK"
           rescue Pair::IsRunningInfo
-            pair.execute(:status) unless @options.nagios
-          rescue => e
-            #$stderr.write "#{ME}: error: #{@action.to_s.upcase} #{pair.dhost}:#{pair.dzfs}: #{e.message} (#{e.backtrace})\n"
-            $stderr.write "#{ME}: error: #{@action.to_s.upcase} #{pair.destination}: #{e.message}\n"
-            sn_rt = NAGIOS_UNKNOWN
-            sn_svc_out += ": #{Time.now.to_s}: #{e.message}"
-          ensure
             if @options.nagios then
-              sn_svc_out += "#{pair.status} #{pair.lag(:string)}"
               if pair.state == Pair::STATE[:inconsistent] then # really need is_consistent? method
                 sn_rt = NAGIOS_CRITICAL
                 sn_svc_out += ": state is #{Pair::STATE[:inconsistent]}"
@@ -149,9 +142,16 @@ module ZettaBee
                 sn_rt = NAGIOS_WARNING
                 sn_svc_out += ": lag is WARNING"
               else
-                sn_svc_out += ": OK"
+                sn_svc_out += "#{pair.status}: OK"
               end
+            else
+              pair.execute(:status)
             end
+          rescue => e
+            #$stderr.write "#{ME}: error: #{@action.to_s.upcase} #{pair.dhost}:#{pair.dzfs}: #{e.message} (#{e.backtrace})\n"
+            $stderr.write "#{ME}: error: #{@action.to_s.upcase} #{pair.destination}: #{e.message}\n"
+            sn_rt = NAGIOS_UNKNOWN
+            sn_svc_out += ": #{Time.now.to_s}: #{e.message}"
           end
 
           begin

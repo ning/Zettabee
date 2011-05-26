@@ -1,0 +1,18 @@
+#!/usr/bin/env ruby
+
+require 'zmq'
+
+if ARGV.length == 1 then
+  ctx = ZMQ::Context.new
+  skt = ctx.socket(ZMQ::SUB)
+  skt.connect ARGV[0]
+  skt.setsockopt(ZMQ::SUBSCRIBE, '')
+  STDOUT.sync = true
+  loop do
+    mbufferout = skt.recv
+    if mbufferout.include?('summary')
+      $stdout.write(mbufferout)
+      exit 0
+    end
+  end
+end

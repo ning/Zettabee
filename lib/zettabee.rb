@@ -118,7 +118,7 @@ module ZettaBee
 
   class Pair
 
-    attr_reader :source, :destination, :transport, :port, :sshport, :sshkey, :clag, :wlag, :nagios_svc_description, :logfile, :fingerprint
+    attr_reader :source, :destination, :transport, :port, :sshport, :sshkey, :clag, :wlag, :nagios_svc_description, :logfile, :fingerprint, :mbuffer_summary
 
     ZFIX = "zettabee"
 
@@ -186,6 +186,7 @@ module ZettaBee
       @nagios_svc_description = "service/#{ZFIX}:#{@fingerprint}"
 
       @runstart = 0
+      @mbuffer_summary = ""
       
     end
 
@@ -389,31 +390,17 @@ module ZettaBee
     end
 
     def runstatus_thr(interval=0)
-      interrupted = false
-      trap("INT") { interrupted = true }
       if is_running? then
+        puts "ok, im runing"
         ctx = ZMQ::Context.new
         skt = ctx.socket(ZMQ::SUB)
         skt.connect statuszocket
         skt.setsockopt(ZMQ::SUBSCRIBE, '')
-        STDOUT.sync = true
-        begin
-          loop do
-            if interrupted
-              skt.close
-              ctx.close
-              exit 0
-            else
-              skt.recv
-            end
-          end
-        rescue RuntimeError
-              $stdout.write "\n"
-              skt.close
-              ctx.close
-              exit 0
+        skt.setsockopt(ZMQ::NOBLOCK, 1 )
+        puts "about to enter loop"
+        loop do
+          skt.recv
         end
-        STDOUT.sync = false
       else
         raise Error, "currently not running"
       end
@@ -436,8 +423,6 @@ module ZettaBee
       ctx = ZMQ::Context.new()
       skt = ctx.socket(ZMQ::PUB)
       skt.bind statuszocket
-
-      monitor = Thread.new(runstatus_thr)
 
       @runstart = DateTime.parse(File.ctime(@zmqsock).to_s)
 
@@ -469,6 +454,8 @@ module ZettaBee
         pid, stdin, stdout, stderr = popen4("mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@destination.name}")
         @log.debug "  launched 'mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@destination.name}' [pid #{pid}]"
 
+        mpid, mstdin, mstdout, mstderr = popen4("zettabeem #{statuszocket}")
+
         sleep(15) # this sleep is intended to let zfs recv get ready
 
         nextsnapshot.send(:options => zfssend_opts,:session => session,:pipe => "mbuffer -s 128k -m 500M -R 50M -O #{@destination.host}:#{@port}",:zmqsocket => skt)
@@ -490,8 +477,8 @@ module ZettaBee
 
         skt.close
         ctx.close
-        puts monitor.value
-        monitor.kill
+        mignored, mstatus = Process::waitpid2 mpid
+        @mbuffer_summary = mstdout.read.strip if mstatus.exitstatus == 0
         @log.info "#{@source.host}:#{nextsnapshot.name} #{mode.to_s.upcase} #{@destination.host}:#{@destination.name} END"
       end
       unlock
