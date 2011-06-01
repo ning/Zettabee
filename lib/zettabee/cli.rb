@@ -125,22 +125,22 @@ module ZettaBee
         execpairs.each do |pair|
           sn = NSCA.new(@options.nagios,pair.destination.host,pair.nagios_svc_description)
           sn_rt = NAGIOS_OK
-          sn_svc_out = "#{@action.to_s.upcase} #{pair.destination}: #{Time.now.to_s}: "
+          sn_svc_out = "#{@action.to_s.upcase} #{pair.destination}: #{Time.now.asctime}: "
 
           begin
             pair.execute(@action.to_sym)
-            sn_svc_out += ": #{pair.mbs}: OK"
+            sn_svc_out += "#{pair.mbs}: OK"
           rescue Pair::IsRunningInfo
             if @options.nagios then
               if pair.state == Pair::STATE[:inconsistent] then # really need is_consistent? method
                 sn_rt = NAGIOS_CRITICAL
-                sn_svc_out += ": state is #{Pair::STATE[:inconsistent]}"
+                sn_svc_out += "state is #{Pair::STATE[:inconsistent]}"
               elsif pair.lag >= pair.clag then
                 sn_rt = NAGIOS_CRITICAL
-                sn_svc_out += ": lag is CRITICAL"
+                sn_svc_out += "lag is CRITICAL"
               elsif pair.lag >= pair.wlag then
                 sn_rt = NAGIOS_WARNING
-                sn_svc_out += ": lag is WARNING"
+                sn_svc_out += "lag is WARNING"
               else
                 sn_svc_out += "#{pair.status}: OK"
               end
@@ -151,7 +151,7 @@ module ZettaBee
             #$stderr.write "#{ME}: error: #{@action.to_s.upcase} #{pair.dhost}:#{pair.dzfs}: #{e.message} (#{e.backtrace})\n"
             $stderr.write "#{ME}: error: #{@action.to_s.upcase} #{pair.destination}: #{e.message}\n"
             sn_rt = NAGIOS_UNKNOWN
-            sn_svc_out += ": #{Time.now.to_s}: #{e.message}"
+            sn_svc_out += "#{e.message}"
           end
 
           begin
