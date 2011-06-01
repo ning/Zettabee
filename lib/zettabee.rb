@@ -118,7 +118,7 @@ module ZettaBee
 
   class Pair
 
-    attr_reader :source, :destination, :transport, :port, :sshport, :sshkey, :clag, :wlag, :nagios_svc_description, :logfile, :fingerprint, :mbuffer_summary
+    attr_reader :source, :destination, :transport, :port, :sshport, :sshkey, :clag, :wlag, :mbs, :nagios_svc_description, :logfile, :fingerprint
 
     ZFIX = "zettabee"
 
@@ -150,6 +150,7 @@ module ZettaBee
       @sshkey = cfgoptions[:sshkey]
       @clag = cfgoptions[:clag].to_i
       @wlag = cfgoptions[:wlag].to_i
+      @mbs = nil
 
       # ---------------------------------------------------------------------------
 
@@ -186,8 +187,7 @@ module ZettaBee
       @nagios_svc_description = "service/#{ZFIX}:#{@fingerprint}"
 
       @runstart = 0
-      @mbuffer_summary = ""
-      
+
     end
 
     def execute(action)
@@ -454,11 +454,18 @@ module ZettaBee
         pid, stdin, stdout, stderr = popen4("mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@destination.name}")
         @log.debug "  launched 'mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@destination.name}' [pid #{pid}]"
 
-        mpid, mstdin, mstdout, mstderr = popen4("zettabeem #{statuszocket}")
+        zettabeem_cmd = "#{File.expand_path(File.dirname(__FILE__))}/../libexec/zettabeem #{statuszocket}"
+
+        mpid, mstdin, mstdout, mstderr = popen4(zettabeem_cmd)
+        @log.debug "  launched '#{zettabeem_cmd}'"
 
         sleep(15) # this sleep is intended to let zfs recv get ready
 
-        nextsnapshot.send(:options => zfssend_opts,:session => session,:pipe => "mbuffer -s 128k -m 500M -R 50M -O #{@destination.host}:#{@port}",:zmqsocket => skt)
+        begin
+          nextsnapshot.send(:options => zfssend_opts,:session => session,:pipe => "mbuffer -s 128k -m 500M -R 50M -O #{@destination.host}:#{@port}",:zmqsocket => skt)
+        rescue ZFSError => e
+          raise ZFSError, stderr.read.strip
+        end
 
         ignored, status = Process::waitpid2 pid
 
@@ -478,7 +485,11 @@ module ZettaBee
         skt.close
         ctx.close
         mignored, mstatus = Process::waitpid2 mpid
-        @mbuffer_summary = mstdout.read.strip if mstatus.exitstatus == 0
+        if mstatus.exitstatus == 0 then
+          @mbs = mstdout.read.strip.sub( "summary: ","")
+        else
+          @mbs = mstderr.read.strip
+        end
         @log.info "#{@source.host}:#{nextsnapshot.name} #{mode.to_s.upcase} #{@destination.host}:#{@destination.name} END"
       end
       unlock

@@ -65,6 +65,7 @@ module ZettaBee
         skt = args[:zmqsocket]
         options = args[:options]
         ec = nil
+        err = nil
         sessionchannel = session.open_channel do |channel|
           zfscommand = "zfs send #{options} #{@name}"
           zfscommand += " | #{pipe}" unless pipe.nil?
@@ -80,6 +81,7 @@ module ZettaBee
               end
               channel.on_extended_data do |ch, type, data|
                 skt.send data
+                err = data
               end
               channel.on_close do |ch|
                 @log.debug " channel closed"
@@ -90,7 +92,7 @@ module ZettaBee
           end
         end
         sessionchannel.wait
-        raise ZFSError, "failed to zfs send #{@name}" unless ec == 0
+        raise ZFSError, "failed to zfs send #{@name}: #{err}" unless ec == 0
       end
 
       def zfs(command,session=nil)

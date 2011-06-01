@@ -129,7 +129,7 @@ module ZettaBee
 
           begin
             pair.execute(@action.to_sym)
-            sn_svc_out += ": #{pair.mbuffer_summary}: OK"
+            sn_svc_out += ": #{pair.mbs}: OK"
           rescue Pair::IsRunningInfo
             if @options.nagios then
               if pair.state == Pair::STATE[:inconsistent] then # really need is_consistent? method
