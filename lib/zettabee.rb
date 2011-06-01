@@ -454,7 +454,7 @@ module ZettaBee
         pid, stdin, stdout, stderr = popen4("mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@destination.name}")
         @log.debug "  launched 'mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@destination.name}' [pid #{pid}]"
 
-        zettabeem_cmd = "#{File.expand_path(File.dirname(__FILE__))}/../libexec/zettabeem #{statuszocket}"
+        zettabeem_cmd = "#{File.expand_path(File.dirname(__FILE__))}/../bin/__zettabeem #{statuszocket}"
 
         mpid, mstdin, mstdout, mstderr = popen4(zettabeem_cmd)
         @log.debug "  launched '#{zettabeem_cmd}'"

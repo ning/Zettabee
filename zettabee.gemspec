@@ -18,7 +18,7 @@ Gem::Specification.new do |s|
   s.add_dependency('open4', '>= 1.0.1')
   s.add_dependency('zmq', '>= 2.1.0.1')
 
-  s.files        = [ 'lib/zettabee.rb', 'lib/zettabee/cli.rb', 'lib/zettabee/version.rb', 'lib/zettabee/nsca.rb', 'lib/zettabee/zfs.rb', 'bin/zettabee', 'libexec/zettabeem' ]
-  s.executables  = [ 'zettabee', 'zettabeem' ]
+  s.files        = [ 'lib/zettabee.rb', 'lib/zettabee/cli.rb', 'lib/zettabee/version.rb', 'lib/zettabee/nsca.rb', 'lib/zettabee/zfs.rb', 'bin/zettabee', 'bin/__zettabeem' ]
+  s.executables  = [ 'zettabee', '__zettabeem' ]
   s.require_path = 'lib'
 end
