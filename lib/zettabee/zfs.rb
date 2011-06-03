@@ -41,7 +41,7 @@ module ZettaBee
       def get(property,session=nil)
         zfscommand = "zfs get -H -o value #{property.to_s} #{@name}"
         value,err = zfs(zfscommand,session)
-        value
+        value[0]
       end
 
       def set(property,value,session=nil)
@@ -57,6 +57,12 @@ module ZettaBee
       def snapshot(session=nil)
         zfscommand = "zfs snapshot #{@name}"
         zfs(zfscommand,session)
+      end
+
+      def list_snapshots(session=nil)
+        zfscommand = "zfs list -r -t snapshot -H -o name,creation #{@name}"
+        value,err = zfs(zfscommand,session)
+        value
       end
 
       def send(args)
@@ -96,15 +102,12 @@ module ZettaBee
       end
 
       def zfs(command,session=nil)
-        out = nil
-        err = nil
+        out = []
+        err = []
         if session.nil? then
           pstatus = popen4(command) do |pid, pstdin, pstdout, pstderr|
-#            @log.debug " launching #{command}"
-            o = pstdout.readlines[0]
-            out = o.strip unless o.nil?
-            e = pstderr.readlines[0]
-            err = e.strip unless e.nil?
+            out = pstdout.readlines.map { |l| l.strip }
+            err = pstderr.readlines.map { |l| l.strip }
           end
           raise ZFSError, "#{err}" unless pstatus.exitstatus == 0
         else

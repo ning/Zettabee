@@ -26,7 +26,8 @@ module ZettaBee
     @nagios = false
     @verbose = false
     @cfgfile = nil
-    class << self; attr_accessor :debug, :nagios, :verbose, :cfgfile; end
+    @fullstatus = false
+    class << self; attr_accessor :debug, :nagios, :verbose, :cfgfile, :fullstatus; end
 
     class Error < StandardError; end
     class ConfigurationError < Error; end
@@ -216,8 +217,11 @@ module ZettaBee
       end
       rh,rm,rs = runtime(:hms)
       @destination.exists? ? lss = lastsnapshot : lss = '-'
-#      print Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d%s  %s:%d  %s (%d:%02d:%02d)\n",@source.host.ljust(8),@source.name.ljust(45),@destination.host.rjust(8),@destination.name.ljust(36),state.ljust(14),h,m,s,lbang,lss.rjust(26),@port,status,rh,rm,rs)
-      print Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d%s  %s (%d:%02d:%02d)\n",@source.host.ljust(8),@source.name.ljust(45),@destination.host.rjust(8),@destination.name.ljust(36),state.ljust(14),h,m,s,lbang,status,rh,rm,rs)
+      if Set.fullstatus then
+        print Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d%s  %s:%d  %s (%d:%02d:%02d)\n",@source.host.ljust(8),@source.name.ljust(45),@destination.host.rjust(8),@destination.name.ljust(36),state.ljust(14),h,m,s,lbang,lss.rjust(26),@port,status,rh,rm,rs)
+      else
+        print Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d%s  %s (%d:%02d:%02d)\n",@source.host.ljust(8),@source.name.ljust(45),@destination.host.rjust(8),@destination.name.ljust(36),state.ljust(14),h,m,s,lbang,status,rh,rm,rs)
+      end
     end
 
     def output_fingerprint
@@ -437,6 +441,7 @@ module ZettaBee
           zfsrecv_opts = "-o #{@zfsproperties[:source]}='#{@source.host}:#{@source.name}' -o #{@zfsproperties[:destination]}='#{@destination.host}:#{@destination.name}'"
         when :update then
           raise StateError, "must initialize a pair before updating" unless is_synchronized?
+          snapshots = @destination.list_snapshots
           zfssend_opts = "-i #{@source_lastsnap.snapshot_name}"
         else
           raise Error, "invalid mode #{mode}"
@@ -444,18 +449,17 @@ module ZettaBee
       @log.debug " mode: #{mode.to_s}; zfs send options: '#{zfssend_opts}'; zfs recv options: '#{zfsrecv_opts}'"
 
       Net::SSH.start(@source.host,'root',:port => @sshport,:keys => [ @sshkey ]) do |session|
-        @log.debug " starting SSH session to #{session.host}"
 
         @source.set(@zfsproperties[:source],"#{@source.host}:#{@source.name}",session) if mode == :initialize
         @source.set(@zfsproperties[:destination],"#{@destination.host}:#{@destination.name}",session) if mode == :initialize
 
         nextsnapshot.snapshot(session)
 
-        pid, stdin, stdout, stderr = popen4("mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@destination.name}")
-        @log.debug "  launched 'mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@destination.name}' [pid #{pid}]"
+        zfsrecv_cmd = "mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@destination.name}"
+        pid, stdin, stdout, stderr = popen4(zfsrecv_cmd)
+        @log.debug "  #{zfsrecv_cmd}' [pid #{pid}]"
 
         zettabeem_cmd = "#{File.expand_path(File.dirname(__FILE__))}/../bin/__zettabeem #{statuszocket}"
-
         mpid, mstdin, mstdout, mstderr = popen4(zettabeem_cmd)
         @log.debug "  launched '#{zettabeem_cmd}'"
 
@@ -486,7 +490,7 @@ module ZettaBee
         ctx.close
         mignored, mstatus = Process::waitpid2 mpid
         if mstatus.exitstatus == 0 then
-          @mbs = mstdout.read.strip.sub( "summary: ","")
+          @mbs = mstdout.read.strip.sub("summary: ","").sub("- average of","@")
         else
           @mbs = mstderr.read.strip
         end

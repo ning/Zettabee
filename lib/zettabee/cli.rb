@@ -54,6 +54,7 @@ module ZettaBee
         opts.on('-v', '--verbose', "Verbose Mode")                                          { @options.verbose = true }
         opts.on('-n', '--nagios NAGIOSHOST', String, "Nagios Host for NSCA")                { |nagioshost| @options.nagios = nagioshost }
         opts.on('-c', '--config CONFIG', String, "Configuration file location")             { |cfgfile| @options.cfgfile = cfgfile }
+        opts.on('-F', '--full-status', "Show full status")                                  { @options.fullstatus = true }
 
         opts.parse!(@arguments) rescue return false
 
@@ -75,6 +76,7 @@ module ZettaBee
         Set.debug = @options.debug if @options.debug
         Set.cfgfile = @options.cfgfile if @options.cfgfile
         Set.verbose = @options.verbose if @options.verbose
+        Set.fullstatus = @options.fullstatus if @options.fullstatus
       end
 
       def process_arguments
