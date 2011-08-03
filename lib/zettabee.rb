@@ -438,8 +438,7 @@ module ZettaBee
         when :initialize then
           raise StateError, "cannot initialize a synchronized pair" if is_synchronized?
           zfssend_opts = ""
-          @source.get("")
-          zfsrecv_opts = "-o #{@zfsproperties[:source]}='#{@source.host}:#{@source.name}' -o #{@zfsproperties[:destination]}='#{@destination.host}:#{@destination.name}' -o quota=#{@source.get('quota')} -o reservation=#{@source.get('reservation')} -o=compression=#{@source.get('compression')}"
+          zfsrecv_opts = "-o #{@zfsproperties[:source]}='#{@source.host}:#{@source.name}' -o #{@zfsproperties[:destination]}='#{@destination.host}:#{@destination.name}'"
         when :update then
           raise StateError, "must initialize a pair before updating" unless is_synchronized?
           snapshots = @destination.list_snapshots
@@ -451,8 +450,11 @@ module ZettaBee
 
       Net::SSH.start(@source.host,'root',:port => @sshport,:keys => [ @sshkey ]) do |session|
 
-        @source.set(@zfsproperties[:source],"#{@source.host}:#{@source.name}",session) if mode == :initialize
-        @source.set(@zfsproperties[:destination],"#{@destination.host}:#{@destination.name}",session) if mode == :initialize
+        if mode == :initialize then
+          @source.set(@zfsproperties[:source],"#{@source.host}:#{@source.name}",session) if mode == :initialize
+          @source.set(@zfsproperties[:destination],"#{@destination.host}:#{@destination.name}",session) if mode == :initialize
+          zfsrecv_opts += " -o quota=#{@source.get('quota',session)} -o reservation=#{@source.get('reservation',session)} -o=compression=#{@source.get('compression',session)}"
+        end
 
         nextsnapshot.snapshot(session)
 
