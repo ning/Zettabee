@@ -438,7 +438,8 @@ module ZettaBee
         when :initialize then
           raise StateError, "cannot initialize a synchronized pair" if is_synchronized?
           zfssend_opts = ""
-          zfsrecv_opts = "-o #{@zfsproperties[:source]}='#{@source.host}:#{@source.name}' -o #{@zfsproperties[:destination]}='#{@destination.host}:#{@destination.name}'"
+          @source.get("")
+          zfsrecv_opts = "-o #{@zfsproperties[:source]}='#{@source.host}:#{@source.name}' -o #{@zfsproperties[:destination]}='#{@destination.host}:#{@destination.name}' -o quota=#{@source.get('quota')} -o reservation=#{@source.get('reservation')} -o=compression=#{@source.get('compression')}"
         when :update then
           raise StateError, "must initialize a pair before updating" unless is_synchronized?
           snapshots = @destination.list_snapshots
