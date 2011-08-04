@@ -124,7 +124,9 @@ module ZettaBee
                   err = data
                 end
                 channel.on_data do |ch,data|
-                  out = data
+                  o = data.strip
+                  out = [o]
+                  @log.debug "      ==> #{out}"
                 end
                 channel.on_close do |ch|
                   @log.debug "  channel closed"

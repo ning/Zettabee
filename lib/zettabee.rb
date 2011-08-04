@@ -309,7 +309,7 @@ module ZettaBee
       consistency = false
       fingerprint = @destination.get(@zfsproperties[:fingerprint])
 
-      if @fingerprint ==  fingerprint then
+      if @fingerprint == fingerprint then
         consistency = true if @destination_lastsnap.get(:creation)
       end
 
@@ -328,6 +328,8 @@ module ZettaBee
             else
               raise StateError, "mismatched fingerprint"
             end
+          elsif is_running?
+            s = false
           else
             raise StateError, "missing last snapshot"
           end
@@ -453,7 +455,7 @@ module ZettaBee
         if mode == :initialize then
           @source.set(@zfsproperties[:source],"#{@source.host}:#{@source.name}",session) if mode == :initialize
           @source.set(@zfsproperties[:destination],"#{@destination.host}:#{@destination.name}",session) if mode == :initialize
-          zfsrecv_opts += " -o quota=#{@source.get('quota',session)} -o reservation=#{@source.get('reservation',session)} -o=compression=#{@source.get('compression',session)}"
+          zfsrecv_opts += " -o quota=#{@source.get('quota',session)} -o reservation=#{@source.get('reservation',session)} -o compression=#{@source.get('compression',session)}"
         end
 
         nextsnapshot.snapshot(session)
