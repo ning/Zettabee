@@ -460,7 +460,7 @@ module ZettaBee
 
         nextsnapshot.snapshot(session)
 
-        zfsrecv_cmd = "mbuffer -s 128k -m 500M -q -I #{@port} | zfs receive -o readonly=on #{zfsrecv_opts} #{@destination.name}"
+        zfsrecv_cmd = "mbuffer -s 128k -m 500M -q -I #{@port} -l /tmp/zettabee.#{@fingerprint}.mbuffer.log 2>/tmp/zettabee.#{@fingerprint}.mbuffer.err | zfs receive -o readonly=on #{zfsrecv_opts} #{@destination.name} 2>/tmp/zettabee.#{@fingerprint}.zfsrecv.err"
         pid, stdin, stdout, stderr = popen4(zfsrecv_cmd)
         @log.debug "  #{zfsrecv_cmd}' [pid #{pid}]"
 

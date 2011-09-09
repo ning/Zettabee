@@ -23,7 +23,6 @@ module ZettaBee
       @options = OpenStruct.new
 
       # defaults
-      @options.ymlfile = "/local/etc/zettabee/zettabee.yml"
       @options.cfgfile = "/local/etc/zettabee/zettabee.cfg"
       @options.debug = false
       @options.nagios = false
@@ -52,7 +51,7 @@ module ZettaBee
         opts.on('-h', '--help')                                                             { output_help ; exit 0}
         opts.on('-d', '--debug', "Debug mode" )                                             { @options.debug = true }
         opts.on('-v', '--verbose', "Verbose Mode")                                          { @options.verbose = true }
-        opts.on('-n', '--nagios NAGIOSHOST', String, "Nagios Host for NSCA")                { |nagioshost| @options.nagios = nagioshost }
+        opts.on('-N', '--nagios NAGIOSHOST', String, "Nagios Host for NSCA")                { |nagioshost| @options.nagios = nagioshost }
         opts.on('-c', '--config CONFIG', String, "Configuration file location")             { |cfgfile| @options.cfgfile = cfgfile }
         opts.on('-F', '--full-status', "Show full status")                                  { @options.fullstatus = true }
 

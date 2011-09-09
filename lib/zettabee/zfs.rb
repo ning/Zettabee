@@ -73,7 +73,7 @@ module ZettaBee
         ec = nil
         err = nil
         sessionchannel = session.open_channel do |channel|
-          zfscommand = "zfs send #{options} #{@name}"
+          zfscommand = "zfs send #{options} #{@name} 2>/tmp/#{@snapshot_name}.zfssend.err"
           zfscommand += " | #{pipe}" unless pipe.nil?
           @log.debug "  starting SSH session channel to #{session.host}"
           channel.exec zfscommand do |ch,chs|
@@ -126,7 +126,6 @@ module ZettaBee
                 channel.on_data do |ch,data|
                   o = data.strip
                   out = [o]
-                  @log.debug "      ==> #{out}"
                 end
                 channel.on_close do |ch|
                   @log.debug "  channel closed"
