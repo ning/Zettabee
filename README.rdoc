@@ -1,0 +1,62 @@
+= Zettabee
+
+Zettabee performs incremental, block-level, asynchronous replication of remote ZFS file systems
+through the use of zfs send and zfs recv. No support for synchronous operation is available. SSH
+is used as a control channel to execute commands on the remote source system and, optionally, 
+mbuffer to enable high levels of network throughput to transfer ZFS streams (unencrypted). SSH
+keys must enable password-less root login from destination systems into remote source systems. 
+File system recursiveness is not supported.
+
+= REQUIREMENTS
+
+Zettabee can be built and deployed as a Ruby gem.
+Source code is available at https://github.com/ning/Zettabee
+
+It is currently only supported with Ruby v1.8.7 and requires the following Ruby gems:
+
+  * net-ssh (>2.1.4)
+  * open4 (>1.0.1)
+  * log4r (>1.1.9)
+  * zmq (>2.1.0.1)
+
+ZMQ requires building native libraries. Additionally, the send_nsca utility must be present
+and configured in order to use Nagios functionality.
+
+= SYNOPSIS
+
+zettabee [options] <action> [<destination>]
+
+where actions are one of:
+
+  * setup
+  * initialize
+  * update
+  * status [--fullstatus]
+  * runstatus
+  * unlock
+  * logfile
+  * fingerprint
+  * purge
+
+and options include --debug, --verbose, and --nagios.
+
+A --version options prints out the installed version, while --help outputs help.
+
+= CONFIGURATION
+
+The default zettabee.cfg configuration file is /local/etc/zettabee/zettabee.cfg. Use the -c flag 
+to select a different location. One relationship per line, where the format is:
+
+  source   destination   options
+
+== SOURCE and DESTINATION
+
+Source and destination are specified as follows:
+
+host:pool/filesystem
+
+== OPTIONS
+
+Each replication pair has options that configure operational parameters.
+
+  * 
