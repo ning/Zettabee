@@ -59,4 +59,40 @@ host:pool/filesystem
 
 Each replication pair has options that configure operational parameters.
 
-  * 
+  * transport: mbuffer, ssh (not yet implemented)
+  * port: port used by mbuffer on receiving end
+  * sshport: SSH port on remote host
+  * sshkey: full path to private SSH key file
+  * wlag: warning lag threshold
+  * clag: critical lag threshold
+  * wrun: warning run threshold
+  * crun: critical run threshold
+
+== ACTIONS
+
+ * initialize
+   Initializes a remote replication zfs file system.
+
+ * update
+   Updates a remote replication zfs file system.
+
+ * fingerprint
+   Each ZettaBee pair is assigned a MD5 hash which serves as its fingerprint. This fingerprint
+   uniquely identifies a pair and it's used to generate lock, log and status files names, as 
+   well as the service name for Nagios configuration.
+
+ * logfile
+   Outputs the full path of the logfile for a given ZettaBee pair.
+
+ * status [--full-status]
+   Display status of a given Zettabee relationship. The fields shown are as follows:
+   source   destination   state   lag   snapshot:port   status (runtime)
+
+ * runstatus
+   Display the running status of a given mirroring relationship. This directly connects to 
+   mbuffer and shows transfer rates and quantities in real time. Use Ctrl-C to quit (the actual
+   transfer is not affected).
+
+ * unlock
+   If ZettaBee terminates abnormally, it will leave a lock file behind. This is to prevent an 
+   updates from taking place on a possibly inconsistent pair.
