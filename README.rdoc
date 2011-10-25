@@ -1,26 +1,25 @@
-= Zettabee
+= OVERVIEW
 
 Zettabee performs incremental, block-level, asynchronous replication of remote ZFS file systems
-through the use of zfs send and zfs recv. No support for synchronous operation is available. SSH
-is used as a control channel to execute commands on the remote source system and, optionally, 
-mbuffer to enable high levels of network throughput to transfer ZFS streams (unencrypted). SSH
-keys must enable password-less root login from destination systems into remote source systems. 
-File system recursiveness is not supported.
+through the use of zfs send and zfs recv commands. Synchronous operation is not available (as
+ZFS itself does not support it). A replication pair comprises a file system in a remote source
+system and a local destination file system. SSH is used as a control channel to execute commands
+on the remote source system and, optionally, the mbuffer utility to enable high levels of network
+throughput to transfer unencrypted ZFS streams. SSH keys must enable password-less root login from
+destination systems into remote source systems. File system recursiveness is not supported.
 
 = REQUIREMENTS
 
-Zettabee can be built and deployed as a Ruby gem.
-Source code is available at https://github.com/ning/Zettabee
-
-It is currently only supported with Ruby v1.8.7 and requires the following Ruby gems:
+Zettabee can be built and deployed as a Ruby gem (recommended). It is currently only supported with
+Ruby v1.8.7 and requires the following Ruby gems:
 
   * net-ssh (>2.1.4)
   * open4 (>1.0.1)
   * log4r (>1.1.9)
   * zmq (>2.1.0.1)
 
-ZMQ requires building native libraries. Additionally, the send_nsca utility must be present
-and configured in order to use Nagios functionality.
+ZMQ requires building native libraries. Additionally, the Nagios send_nsca utility must be present
+and configured in order to use Nagios passive monitoring functionality.
 
 = SYNOPSIS
 
@@ -38,14 +37,15 @@ where actions are one of:
   * fingerprint
   * purge
 
-and options include --debug, --verbose, and --nagios.
+and options include --debug, --verbose, and --nagios. Some actions, such as fingerprint and status, can
+act on all available destinations. All others require the specification of a destination.
 
-A --version options prints out the installed version, while --help outputs help.
+A --version option prints out the installed version, while --help outputs help.
 
 = CONFIGURATION
 
-The default zettabee.cfg configuration file is /local/etc/zettabee/zettabee.cfg. Use the -c flag 
-to select a different location. One relationship per line, where the format is:
+The default zettabee.cfg configuration file is /local/etc/zettabee/zettabee.cfg. Use the -c flag to select
+a different location. One pair per line, where the format is:
 
   source   destination   options
 
@@ -53,46 +53,70 @@ to select a different location. One relationship per line, where the format is:
 
 Source and destination are specified as follows:
 
-host:pool/filesystem
+  host:pool/filesystem
 
 == OPTIONS
 
 Each replication pair has options that configure operational parameters.
 
   * transport: mbuffer, ssh (not yet implemented)
-  * port: port used by mbuffer on receiving end
-  * sshport: SSH port on remote host
-  * sshkey: full path to private SSH key file
-  * wlag: warning lag threshold
-  * clag: critical lag threshold
-  * wrun: warning run threshold
-  * crun: critical run threshold
+  * port: port used by mbuffer on destination system
+  * sshport: SSH port on remote source host
+  * sshkey: full path to private SSH key file to access remot source system
+  * wlag: warning lag threshold (in seconds)
+  * clag: critical lag threshold (in seconds)
+  * wrun: warning run threshold (in seconds)
+  * crun: critical run threshold (in seconds)
 
-== ACTIONS
+= ACTIONS
 
  * initialize
-   Initializes a remote replication zfs file system.
+   Initializes a replication pair by performing a full transfer of the source file system into the destination.
+   Depending on the size of the file syste and the available bandwidth beteen source and destination, this process
+   can take a fair amount of time.
 
  * update
-   Updates a remote replication zfs file system.
+   Updates a remote replication pair by performing a differential transfer of the source file system into the
+   destination file system from the last good known checkpoint.
 
  * fingerprint
-   Each ZettaBee pair is assigned a MD5 hash which serves as its fingerprint. This fingerprint
-   uniquely identifies a pair and it's used to generate lock, log and status files names, as 
-   well as the service name for Nagios configuration.
+   Each ZettaBee pair is assigned a MD5 hash which serves as its fingerprint. This fingerprint uniquely identifies
+   a pair and it is used to generate lock, log and status files names as well as the Nagios service name.
 
  * logfile
-   Outputs the full path of the logfile for a given ZettaBee pair.
+   Outputs the full path of the logfile for a given ZettaBee pair. This is useful when used as follows:
+   # tail -f `zettabee logfile <destination>`
 
  * status [--full-status]
-   Display status of a given Zettabee relationship. The fields shown are as follows:
-   source   destination   state   lag   snapshot:port   status (runtime)
+   Display status of a given Zettabee pair. The fields shown are as follows:
+
+     source   destination   state   lag   snapshot:port   status (runtime)
+
+   The --full-status flag adds the fingerprint and mbuffer port.
 
  * runstatus
-   Display the running status of a given mirroring relationship. This directly connects to 
-   mbuffer and shows transfer rates and quantities in real time. Use Ctrl-C to quit (the actual
-   transfer is not affected).
+   Display the running status of a given pair. This directly connects to mbuffer's stderr stream and shows transfer
+   rates and quantities in real time. Use Ctrl-C to quit (the actual transfer is not affected).
 
  * unlock
    If ZettaBee terminates abnormally, it will leave a lock file behind. This is to prevent an 
    updates from taking place on a possibly inconsistent pair.
+
+= RUNNING ZETTABEE
+
+== Initialization
+
+All Zettabee pairs must be initialized, a process that may take a long time (use of the GNU screen utility is highly
+recommended).
+
+== Updates
+
+Once a Zetabee pair is initalized, updates are run on the pair on a regular basis (from cron or any other scheduling
+facility). Under normal circumstances, zettabee does not produce any output on stdout. The use of Nagios passive
+monitoring is highly recommended.
+
+= MONITORING
+
+Zettabee utilizes Nagios passive monitoring to report status.
+
+Additionally, real time status is available via the runstatus action (when using mbuffer).
