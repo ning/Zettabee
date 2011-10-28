@@ -9,7 +9,7 @@ Gem::Specification.new do |s|
   s.email                     = 'gerir@ning.com'
   s.homepage                  = 'https://github.com/ning/Zettabee'
   s.summary                   = "Remote Asynchronous ZFS Mirroring"
-  s.description               = "Zettabee is performs incremental, block-level, asynchronous replication of remote ZFS file systems through the use of zfs send and zfs recv"
+  s.description               = "Zettabee performs incremental, block-level, asynchronous replication of remote ZFS file systems through the use of zfs send and zfs recv"
   s.license                   = "Apache License, Version 2.0"
   s.required_ruby_version     = '= 1.8.7'
   s.required_rubygems_version = ">= 1.3.5"
