@@ -182,7 +182,7 @@ module ZettaBee
         $stderr.write "            -n, --nagios <nagioshost> : send NSCA result to <nagioshost>\n"
         $stderr.write "            -c, --config <configfile> : read configuration from <configfile>\n"
         $stderr.write "            \n"
-        $stderr.write " <destination> is <host>:<filesystem>\n"
+        $stderr.write " <destination> is [<host>:]<filesystem>\n"
       end
 
       def output_options(exit_status)
