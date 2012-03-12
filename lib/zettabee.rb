@@ -455,7 +455,7 @@ module ZettaBee
         if mode == :initialize then
           @source.set(@zfsproperties[:source],"#{@source.host}:#{@source.name}",session) if mode == :initialize
           @source.set(@zfsproperties[:destination],"#{@destination.host}:#{@destination.name}",session) if mode == :initialize
-          zfsrecv_opts += " -o quota=#{@source.get('quota',session)} -o reservation=#{@source.get('reservation',session)} -o compression=#{@source.get('compression',session)}"
+          zfsrecv_opts += " -o quota=#{@source.get('quota',session)} -o compression=#{@source.get('compression',session)}"
         end
 
         nextsnapshot.snapshot(session)
