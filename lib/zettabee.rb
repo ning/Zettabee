@@ -462,11 +462,7 @@ module ZettaBee
 
         STDOUT.sync = true
 
-        puts "comparing versions"
-
         raise ZettabeeError, "destination zpool version must be greater or equal to source zpool version" unless @destination.zpool_version >= @source.zpool_version
-
-        puts "done comparing versions"
 
         if mode == :initialize
           @source.set(@zfsproperties[:source],"#{@source.host}:#{@source.name}",session) if mode == :initialize

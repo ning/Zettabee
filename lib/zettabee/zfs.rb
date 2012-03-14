@@ -45,8 +45,6 @@ module ZettaBee
 
       def zpool_version
         return @zpool_version unless @zpool_version.nil?
-        puts @session
-        puts zfs("zpool get version #{@pool} | tail -1 | awk '{print $3}'",@session)[0][0]
         @zpool_version = Integer(zfs("zpool get version #{@pool} | tail -1 | awk '{print $3}'",@session)[0][0])
       end
 
