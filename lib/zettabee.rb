@@ -168,6 +168,7 @@ module ZettaBee
       @zmqsock = "/local/var/run/#{ZFIX}/#{@fingerprint}.zmq"
       @lckfile = "/local/var/run/#{ZFIX}/#{@fingerprint}.lck"
       @logfile = "/local/var/log/#{ZFIX}/#{@fingerprint}.log"
+      @tmpdir = "/local/var/tmp/#{ZFIX}"
       @log = Log4r::Logger.new(@fingerprint)
 
       @source = ZFS::Dataset.new(szfs,shost, :log => @log)
@@ -472,7 +473,14 @@ module ZettaBee
 
         nextsnapshot.snapshot(session)
 
-        zfsrecv_cmd = "mbuffer -s 128k -m 500M -q -I #{@port} -l /tmp/zettabee.#{@fingerprint}.mbuffer.log 2>/tmp/zettabee.#{@fingerprint}.mbuffer.err | zfs receive #{zfsrecv_opts} #{@destination.name}"
+        mbuffer_send_log = "/tmp/#{@fingerprint}.mbuffer.log"
+        zfs_send_err = "/tmp/#{@source_lastsnap.snapshot_name}.zfssend.err"
+        FileUtils.mkdir_p("#{@tmpdir}/#{@fingerprint}")
+        mbuffer_recv_log = "#{@tmpdir}/#{@fingerprint}/mbuffer.log"
+        mbuffer_recv_err = "#{@tmpdir}/#{@fingerprint}/mbuffer.err"
+
+
+        zfsrecv_cmd = "mbuffer -s 128k -m 500M -q -I #{@port} -l #{mbuffer_recv_log} 2>#{mbuffer_recv_err} | zfs receive #{zfsrecv_opts} #{@destination.name}"
         pid, stdin, stdout, stderr = popen4(zfsrecv_cmd)
         @log.debug "  #{zfsrecv_cmd}' [pid #{pid}]"
 
@@ -484,7 +492,7 @@ module ZettaBee
         sleep(15) # this sleep is intended to let zfs recv get ready
 
         begin
-         nextsnapshot.send(:options => zfssend_opts,:session => session,:pipe => "mbuffer -l /tmp/zettabee.#{@fingerprint}.mbuffer.log -s 128k -m 500M -R 50M -O #{@destination.host}:#{@port} >/tmp/zettabee.#{@fingerprint}.mbuffer.out",:zmqsocket => skt)
+         nextsnapshot.send(:options => zfssend_opts,:session => session,:pipe => "mbuffer -l #{mbuffer_send_log} -s 128k -m 500M -R 50M -O #{@destination.host}:#{@port} >/dev/null",:zfs_send_err => zfs_send_err, :zmqsocket => skt)
         rescue ZFSError
           raise ZFSError stderr.read.strip
         end
@@ -506,7 +514,8 @@ module ZettaBee
         if mode == :update
           @source_lastsnap.destroy(session)
           @source_lastsnap = ZFS::Dataset.new("#{@source.name}@#{nextsnapshot.snapshot_name}",@source.host, :log => @log)
-#          @destination_lastsnap = ZFS::Dataset.new("#{@destination.name}@#{nextsnapshot.snapshot_name}",@destination.host, :log => @log)
+          @destination_lastsnap.destroy
+          @destination_lastsnap = ZFS::Dataset.new("#{@destination.name}@#{nextsnapshot.snapshot_name}",@destination.host, :log => @log)
         end
 
         skt.close
@@ -518,6 +527,9 @@ module ZettaBee
         else
           @mbs = mstderr.read.strip
         end
+
+        session.exec("rm -f #{mbuffer_send_log} #{zfs_send_err}")
+        FileUtils.rm_f([mbuffer_recv_log,mbuffer_recv_err])
         @log.info "#{@source.host}:#{nextsnapshot.name} #{mode.to_s.upcase} #{@destination.host}:#{@destination.name} END"
       end
       unlock

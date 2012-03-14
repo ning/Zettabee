@@ -88,11 +88,12 @@ module ZettaBee
         session = args[:session]
         pipe = args[:pipe]
         skt = args[:zmqsocket]
+        zfs_send_err = args[:zfs_send_err]
         options = args[:options]
         ec = nil
         err = nil
         sessionchannel = session.open_channel do |channel|
-          zfscommand = "zfs send #{options} #{@name} 2>/tmp/#{@snapshot_name}.zfssend.err"
+          zfscommand = "zfs send #{options} #{@name} 2>#{zfs_send_err}"
           zfscommand += " | #{pipe}" unless pipe.nil?
           @log.debug "  starting SSH session channel to #{session.host}"
           channel.exec zfscommand do |ch,chs|
