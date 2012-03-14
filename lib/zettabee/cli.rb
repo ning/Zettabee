@@ -149,7 +149,6 @@ module ZettaBee
               pair.execute(:status)
             end
           rescue => e
-            #$stderr.write "#{ME}: error: #{@action.to_s.upcase} #{pair.dhost}:#{pair.dzfs}: #{e.message} (#{e.backtrace})\n"
             $stderr.write "#{ME}: error: #{@action.to_s.upcase} #{pair.destination}: #{e.message}\n"
             sn_rt = NAGIOS_UNKNOWN
             sn_svc_out += "#{e.message}"
