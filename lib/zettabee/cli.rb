@@ -20,62 +20,55 @@ module ZettaBee
 
     def initialize(arguments)
       @arguments = arguments
-      @options = OpenStruct.new
-
-      # defaults
-      @options.cfgfile = "/local/etc/zettabee/zettabee.cfg"
-      @options.debug = false
-      @options.nagios = false
-      @options.verbose = false
+      @options = {}
       @action = nil
       @destination = nil
       @pairs = {}
-
     end
 
     def run
-      if parsed_options? && arguments_valid?
-        process_arguments
-        process_command
-      else
-        output_help
-        exit 127
+      begin
+        parsed_options?
+        options_valid?
+        arguments_valid?
+      rescue ArgumentError => e
+        output_error(e.message)
+        exit 1
       end
+      process_options
+      process_arguments
+      process_command
     end
 
     protected
 
       def parsed_options?
         opts = OptionParser.new
-        opts.on('-V', '--version')                                                          { output_version ; exit 0 }
-        opts.on('-h', '--help')                                                             { output_help ; exit 0}
-        opts.on('-d', '--debug', "Debug mode" )                                             { @options.debug = true }
-        opts.on('-v', '--verbose', "Verbose Mode")                                          { @options.verbose = true }
-        opts.on('-N', '--nagios NAGIOSHOST', String, "Nagios Host for NSCA")                { |nagioshost| @options.nagios = nagioshost }
-        opts.on('-c', '--config CONFIG', String, "Configuration file location")             { |cfgfile| @options.cfgfile = cfgfile }
-        opts.on('-F', '--full-status', "Show full status")                                  { @options.fullstatus = true }
+        opts.on('-V', '--version')                                                              { output_version ; exit 0 }
+        opts.on('-h', '--help')                                                                 { output_help ; exit 0}
+        opts.on('-d', '--debug', "Debug mode" )                                                 { @options[:debug] = true }
+        opts.on('-v', '--verbose', "Verbose Mode")                                              { @options[:verbose] = true }
+        opts.on('-z', '--zonfig ZONFIG', String, "Zettabee pairs configuration file location")  { |zfgfile| @options[:zonfig] = zfgfile }
+        opts.on('-c', '--config CONFIG', String, "Zettabee main configuration file location")   { |cfgfile| @options[:config] = cfgfile }
+        opts.on('-N', '--nagios NAGIOSHOST', String, "Nagios Host for NSCA")                    { |nagioshost| @options[:nagios] = nagioshost }
+        opts.on('-F', '--full-status', "Show full status")                                      { @options[:fullstatus] = true }
 
         opts.parse!(@arguments) rescue return false
-
         process_options
         true
 
       end
 
-      def arguments_valid?
-        if @arguments.length < 1 or @arguments.length > 2
-          $stderr.puts "#{ME}: error: invalid number of arguments: #{@arguments}"
-          return false
-        end
+      def options_valid?
         true
       end
 
+      def arguments_valid?
+        raise ArgumentError, "error: invalid number of arguments: #{@arguments}" if @arguments.length < 1 or @arguments.length > 2
+      end
+
       def process_options
-        Set.nagios = @options.nagios if @options.nagios
-        Set.debug = @options.debug if @options.debug
-        Set.cfgfile = @options.cfgfile if @options.cfgfile
-        Set.verbose = @options.verbose if @options.verbose
-        Set.fullstatus = @options.fullstatus if @options.fullstatus
+        true
       end
 
       def process_arguments
@@ -96,14 +89,14 @@ module ZettaBee
       def process_command
 
         begin
-          @zettabees = Set.new(@options.cfgfile)
+          @zettabees = Set.new(@options)
           execpairs = []
         rescue Set::ConfigurationError => e
-          $stderr.write "#{ME}: error: #{e.message}\n"
+          output_error(e.message)
           exit 1
         end
-        
-        if @destination then
+
+        if @destination
           # a destination can be fully specified (a/b/c) or using the last component (c)
           if @destination.split('/').length > 1
             execpairs.push(@zettabees.pair_by_destination[@destination])
@@ -124,7 +117,7 @@ module ZettaBee
         end
 
         execpairs.each do |pair|
-          sn = NSCA.new(@options.nagios,pair.destination.host,pair.nagios_svc_description)
+          sn = NSCA.new(@options[:nagios],pair.destination.host,pair.nagios_svc_description)
           sn_rt = NAGIOS_OK
           sn_svc_out = "#{@action.to_s.upcase} #{pair.destination}: #{Time.now.asctime}: "
 
@@ -155,7 +148,7 @@ module ZettaBee
           end
 
           begin
-            sn.send_nsca(sn_rt,sn_svc_out) if @options.nagios
+            sn.send_nsca(sn_rt,sn_svc_out) if @options[:nagios]
           rescue NSCA::SendNSCAError => e
             $stderr.write "#{ME}: error: send_nsca failed: #{e.message}\n"
           end
@@ -170,18 +163,23 @@ module ZettaBee
       def output_help
         $stderr.write "#{ME} [<options>] <action> [<destination>]\n"
         $stderr.write "\n"
-        $stderr.write " <action>   setup                     : initial #{ME} setup\n"
-        $stderr.write "            status [<destination>]    : display status for all destinations or <destination>\n"
-        $stderr.write "            runstatus <destination>   : show running status for <destination>\n"
-        $stderr.write "            initialize <destination>  : perform first sync for <destination>\n"
-        $stderr.write "            update <destination>      : update sync for <destination>\n"
+        $stderr.write " <action>   setup                      : initial #{ME} setup\n"
+        $stderr.write "            status [<destination>]     : display status for all destinations or <destination>\n"
+        $stderr.write "            runstatus <destination>    : show running status for <destination>\n"
+        $stderr.write "            initialize <destination>   : perform first sync for <destination>\n"
+        $stderr.write "            update <destination>       : update sync for <destination>\n"
         $stderr.write "            \n"
-        $stderr.write " <options>  -d, --debug               : debug (to logfile)\n"
-        $stderr.write "            -v, --verbose             : verbose (to console)\n"
-        $stderr.write "            -n, --nagios <nagioshost> : send NSCA result to <nagioshost>\n"
-        $stderr.write "            -c, --config <configfile> : read configuration from <configfile>\n"
+        $stderr.write " <options>  -d, --debug                : debug (to logfile)\n"
+        $stderr.write "            -v, --verbose              : verbose (to console)\n"
+        $stderr.write "            -n, --nagios <nagioshost>  : send NSCA result to <nagioshost>\n"
+        $stderr.write "            -z, --zonfig <zonfigfile>  : read zettabee pairs configuration from <zonfigfile>\n"
+        $stderr.write "            -c, --config <configfile>  : read main configuration from <configfile>\n"
         $stderr.write "            \n"
         $stderr.write " <destination> is [<host>:]<filesystem>\n"
+      end
+
+      def output_error(message)
+        $stderr.write "#{ME}: error: #{message}\n"
       end
 
       def output_options(exit_status)

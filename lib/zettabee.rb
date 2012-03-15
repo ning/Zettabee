@@ -13,6 +13,7 @@ require 'fileutils'
 require 'digest/md5'
 require 'zettabee/zfs'
 require 'date'
+require 'yaml'
 
 module ZettaBee
 
@@ -22,40 +23,51 @@ module ZettaBee
 
     attr_accessor :pairs
 
-    @debug = false
-    @nagios = false
-    @verbose = false
-    @cfgfile = nil
-    @fullstatus = false
-    class << self; attr_accessor :debug, :nagios, :verbose, :cfgfile, :fullstatus; end
-
     class Error < StandardError; end
     class ConfigurationError < Error; end
 
-    def initialize(cfgfile)
+    def initialize(options_cli)
       @pairs_by_port = {}
       @pairs_by_destination = {}
       @pairs_by_fingerprint = {}
       @pairs = []
+      @options = {
+        :config => "/local/etc/zettabee/zettabee.cfg",
+        :zonfig => "/local/etc/zettabee/zettabee.zfg",
+        :nagios => false,
+        :debug => false,
+        :fullstatus => false,
+        :verbose => false
+      }
+
 
       begin
-        File.open(cfgfile,"r").readlines.each do |cfgline|
-          cfgline.chomp!
-          next if cfgline[0] == 35    # need to change in 1.9
-          c = cfgline.split(/\s+/)
-          shost,szfs = c[0].split(':')
-          dhost,dzfs = c[1].split(':')
-          cfgoptions = {}
-          c[2].split(',').each do |o|
-            cfgoptions[o.split('=')[0].to_sym] = o.split('=')[1]
-          end
-          pair = Pair.new(shost,szfs,dhost,dzfs,cfgoptions)
+        options_cfg = YAML::load_file (options_cli[:config] || @options[:config])
+        @options.merge! options_cfg unless options_cfg.nil? or options_cfg == false
+        @options.merge! options_cli
+      rescue Errno::ENOENT
+        raise ConfigurationError, "could not read main configuration file #{options_cli[:config]}" if options_cli[:config]
+        @options[:config] = nil
+      end
 
-          raise ConfigurationError, "duplicate destination in configuration file: #{dzfs}:#{cfgoptions[:port]}" if @pairs_by_destination.has_key?(dzfs)
-          raise ConfigurationError, "duplicate port in configuration file: #{dzfs}:#{cfgoptions[:port]}" if @pairs_by_port.has_key?(cfgoptions[:port])
+      begin
+        File.open(@options[:zonfig],"r").readlines.each do |zfgline|
+          zfgline.chomp!
+          next if zfgline[0] == 35    # need to change in 1.9
+          z = zfgline.split(/\s+/)
+          shost,szfs = z[0].split(':')
+          dhost,dzfs = z[1].split(':')
+          zfgoptions = {}
+          z[2].split(',').each do |o|
+            zfgoptions[o.split('=')[0].to_sym] = o.split('=')[1]
+          end
+          pair = Pair.new(shost,szfs,dhost,dzfs,zfgoptions,@options)
+
+          raise ConfigurationError, "duplicate destination in configuration file: #{dzfs}:#{zfgoptions[:port]}" if @pairs_by_destination.has_key?(dzfs)
+          raise ConfigurationError, "duplicate port in configuration file: #{dzfs}:#{zfgoptions[:port]}" if @pairs_by_port.has_key?(zfgoptions[:port])
           raise ConfigurationError, "duplicate source::destination #{dzfs}}" if @pairs_by_fingerprint.has_key?(pair.fingerprint)
 
-          @pairs_by_port[cfgoptions[:port]] = pair
+          @pairs_by_port[zfgoptions[:port]] = pair
           @pairs_by_destination[dzfs] = pair
           @pairs_by_fingerprint[pair.fingerprint] = pair
           @pairs.push(pair)
@@ -144,7 +156,7 @@ module ZettaBee
     class Info < StandardError; end
     class IsRunningInfo < Info; end
 
-    def initialize(shost,szfs,dhost,dzfs,cfgoptions={})
+    def initialize(shost,szfs,dhost,dzfs,cfgoptions={},options)
 
       @transport = cfgoptions[:transport]
       @port = cfgoptions[:port]
@@ -177,6 +189,8 @@ module ZettaBee
       @source_lastsnap = nil
       @destination_lastsnap = nil
 
+      @options = options
+
       begin
         lsnp = @destination.get(@zfsproperties[:lastsnap])
         @source_lastsnap = ZFS::Dataset.new("#{@source.name}@#{lsnp}",@source.host, :log => @log)
@@ -185,8 +199,8 @@ module ZettaBee
         raise unless e.message.include?("dataset does not exist")
       end
 
-      @log.add Log4r::StdoutOutputter.new('console', :formatter => Log4r::PatternFormatter.new(:pattern => "[%d] zettabee:%c [%p] %l %m"), :level => Log4r::DEBUG) if Set.verbose
-      Set.debug ? log4level = Log4r::DEBUG : log4level = Log4r::INFO
+      @log.add Log4r::StdoutOutputter.new('console', :formatter => Log4r::PatternFormatter.new(:pattern => "[%d] zettabee:%c [%p] %l %m"), :level => Log4r::DEBUG) if @options[:verbose]
+      @options[:debug] ? log4level = Log4r::DEBUG : log4level = Log4r::INFO
       @log.add Log4r::FileOutputter.new("logfile", :filename => @logfile, :trunc => false, :formatter => Log4r::PatternFormatter.new(:pattern => "[%d] #{ZFIX}:%c [%p] %l %m"), :level => log4level)
       @nagios_svc_description = "service/#{ZFIX}:#{@fingerprint}"
 
@@ -220,7 +234,7 @@ module ZettaBee
       end
       rh,rm,rs = runtime(:hms)
       @destination.exists? ? lss = lastsnapshot : lss = '-'
-      if Set.fullstatus then
+      if @options[:fullstatus] then
         print Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d%s  %s:%d  %s (%d:%02d:%02d)\n",@source.host.ljust(8),@source.name.ljust(45),@destination.host.rjust(8),@destination.name.ljust(36),state.ljust(14),h,m,s,lbang,lss.rjust(26),@port,status,rh,rm,rs)
       else
         print Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d%s  %s (%d:%02d:%02d)\n",@source.host.ljust(8),@source.name.ljust(45),@destination.host.rjust(8),@destination.name.ljust(36),state.ljust(14),h,m,s,lbang,status,rh,rm,rs)
