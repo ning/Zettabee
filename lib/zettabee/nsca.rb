@@ -6,7 +6,7 @@ module ZettaBee
   class NSCA
 
     @send_nsca_bin = "/usr/local/bin/send_nsca"
-    @send_nsca_cfg = "/usr/local/etc/nsca/send_nsca.cfg"
+    @send_nsca_cfg = "/usr/local/etc/nagios/send_nsca.cfg"
     class << self; attr_accessor :send_nsca_bin, :send_nsca_cfg; end
 
     class Error < StandardError; end

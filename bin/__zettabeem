@@ -3,7 +3,7 @@
 require 'rubygems'
 require 'zmq'
 
-if ARGV.length == 1 then
+if ARGV.length == 1
   ctx = ZMQ::Context.new
   skt = ctx.socket(ZMQ::SUB)
   skt.connect ARGV[0]
@@ -13,7 +13,10 @@ if ARGV.length == 1 then
     mbufferout = skt.recv
     if mbufferout.include?('summary')
       $stdout.write(mbufferout)
-      exit 0
+      exit! 0
     end
   end
+  log.close
+else
+  exit 1
 end

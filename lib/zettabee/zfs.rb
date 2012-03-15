@@ -6,6 +6,7 @@ require 'date'
 require 'log4r'
 require 'fileutils'
 require 'digest/md5'
+require 'pp'
 
 module ZettaBee
 
@@ -18,6 +19,7 @@ module ZettaBee
       class SSHError < Error; end
 
       attr_reader :name, :pool, :filesystem, :type, :host, :snapshot_name
+      attr_accessor :session
 
       def initialize(name,host,options={})
         @host = host
@@ -28,6 +30,9 @@ module ZettaBee
         @session = nil
         @type = @name.include?('@') ? :snapshot : :filesystem
         @snapshot_name = @type == :snapshot ? name.split('@')[-1] : nil
+
+        @zpool_version = nil
+        @zfs_version = nil
       end
 
       def to_s
@@ -36,6 +41,20 @@ module ZettaBee
 
       def parent
         File.dirname(@name)
+      end
+
+      def zpool_version
+        return @zpool_version unless @zpool_version.nil?
+        @zpool_version = Integer(zfs("zpool get version #{@pool} | tail -1 | awk '{print $3}'",@session)[0][0])
+      end
+
+      def zfs_version
+        return @zfs_version unless @zfs_version.nil?
+        begin
+          @zfs_version = Integer(get(:version,@session)[0])
+        rescue ZFSError
+          @zfs_version = Integer(zfs("zfs get -H -o value version #{@pool}",@session)[0][0])
+        end
       end
 
       def get(property,session=nil)
@@ -69,11 +88,12 @@ module ZettaBee
         session = args[:session]
         pipe = args[:pipe]
         skt = args[:zmqsocket]
+        zfs_send_err = args[:zfs_send_err]
         options = args[:options]
         ec = nil
         err = nil
         sessionchannel = session.open_channel do |channel|
-          zfscommand = "zfs send #{options} #{@name} 2>/tmp/#{@snapshot_name}.zfssend.err"
+          zfscommand = "zfs send #{options} #{@name} 2>#{zfs_send_err}"
           zfscommand += " | #{pipe}" unless pipe.nil?
           @log.debug "  starting SSH session channel to #{session.host}"
           channel.exec zfscommand do |ch,chs|
@@ -81,12 +101,15 @@ module ZettaBee
             if chs
               channel.on_request "exit-status" do |ch, data|
                ec = data.read_long
+               @log.debug "    on_request #{ec}"
               end
               channel.on_data do |ch, data|
                 skt.send data
+                @log.debug "    on_data #{data.strip}"
               end
               channel.on_extended_data do |ch, type, data|
                 skt.send data
+                @log.debug "    on_extended_data \n#{data.strip}"
                 err = data
               end
               channel.on_close do |ch|
