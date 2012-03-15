@@ -5,7 +5,6 @@ include Open4
 require 'optparse'
 require 'date'
 require 'ostruct'
-require 'rdoc/usage'
 require 'date'
 require 'zmq'
 require 'log4r'
@@ -13,6 +12,8 @@ require 'yaml'
 require 'fileutils'
 require 'digest/md5'
 require 'zettabee/zfs'
+require 'date'
+require 'yaml'
 
 module ZettaBee
 
@@ -22,40 +23,51 @@ module ZettaBee
 
     attr_accessor :pairs
 
-    @debug = false
-    @nagios = false
-    @verbose = false
-    @cfgfile = nil
-    @fullstatus = false
-    class << self; attr_accessor :debug, :nagios, :verbose, :cfgfile, :fullstatus; end
-
     class Error < StandardError; end
     class ConfigurationError < Error; end
 
-    def initialize(cfgfile)
+    def initialize(options_cli)
       @pairs_by_port = {}
       @pairs_by_destination = {}
       @pairs_by_fingerprint = {}
       @pairs = []
+      @options = {
+        :config => "/local/etc/zettabee/zettabee.cfg",
+        :zonfig => "/local/etc/zettabee/zettabee.zfg",
+        :nagios => false,
+        :debug => false,
+        :fullstatus => false,
+        :verbose => false
+      }
+
 
       begin
-        File.open(cfgfile,"r").readlines.each do |cfgline|
-          cfgline.chomp!
-          next if cfgline[0] == 35    # need to change in 1.9
-          c = cfgline.split(/\s+/)
-          shost,szfs = c[0].split(':')
-          dhost,dzfs = c[1].split(':')
-          cfgoptions = {}
-          c[2].split(',').each do |o|
-            cfgoptions[o.split('=')[0].to_sym] = o.split('=')[1]
-          end
-          pair = Pair.new(shost,szfs,dhost,dzfs,cfgoptions)
+        options_cfg = YAML::load_file (options_cli[:config] || @options[:config])
+        @options.merge! options_cfg unless options_cfg.nil? or options_cfg == false
+        @options.merge! options_cli
+      rescue Errno::ENOENT
+        raise ConfigurationError, "could not read main configuration file #{options_cli[:config]}" if options_cli[:config]
+        @options[:config] = nil
+      end
 
-          raise ConfigurationError, "duplicate destination in configuration file: #{dzfs}:#{cfgoptions[:port]}" if @pairs_by_destination.has_key?(dzfs)
-          raise ConfigurationError, "duplicate port in configuration file: #{dzfs}:#{cfgoptions[:port]}" if @pairs_by_port.has_key?(cfgoptions[:port])
+      begin
+        File.open(@options[:zonfig],"r").readlines.each do |zfgline|
+          zfgline.chomp!
+          next if zfgline[0] == 35    # need to change in 1.9
+          z = zfgline.split(/\s+/)
+          shost,szfs = z[0].split(':')
+          dhost,dzfs = z[1].split(':')
+          zfgoptions = {}
+          z[2].split(',').each do |o|
+            zfgoptions[o.split('=')[0].to_sym] = o.split('=')[1]
+          end
+          pair = Pair.new(shost,szfs,dhost,dzfs,zfgoptions,@options)
+
+          raise ConfigurationError, "duplicate destination in configuration file: #{dzfs}:#{zfgoptions[:port]}" if @pairs_by_destination.has_key?(dzfs)
+          raise ConfigurationError, "duplicate port in configuration file: #{dzfs}:#{zfgoptions[:port]}" if @pairs_by_port.has_key?(zfgoptions[:port])
           raise ConfigurationError, "duplicate source::destination #{dzfs}}" if @pairs_by_fingerprint.has_key?(pair.fingerprint)
 
-          @pairs_by_port[cfgoptions[:port]] = pair
+          @pairs_by_port[zfgoptions[:port]] = pair
           @pairs_by_destination[dzfs] = pair
           @pairs_by_fingerprint[pair.fingerprint] = pair
           @pairs.push(pair)
@@ -139,11 +151,12 @@ module ZettaBee
     class LockError < Error; end
     class StateError < Error; end
     class ActionError < Error; end
+    class ZettabeeError < Error; end
 
     class Info < StandardError; end
     class IsRunningInfo < Info; end
 
-    def initialize(shost,szfs,dhost,dzfs,cfgoptions={})
+    def initialize(shost,szfs,dhost,dzfs,cfgoptions={},options)
 
       @transport = cfgoptions[:transport]
       @port = cfgoptions[:port]
@@ -167,12 +180,16 @@ module ZettaBee
       @zmqsock = "/local/var/run/#{ZFIX}/#{@fingerprint}.zmq"
       @lckfile = "/local/var/run/#{ZFIX}/#{@fingerprint}.lck"
       @logfile = "/local/var/log/#{ZFIX}/#{@fingerprint}.log"
+      @tmpdir = "/local/var/tmp/#{ZFIX}"
       @log = Log4r::Logger.new(@fingerprint)
 
       @source = ZFS::Dataset.new(szfs,shost, :log => @log)
       @destination = ZFS::Dataset.new(dzfs,dhost, :log => @log)
+
       @source_lastsnap = nil
       @destination_lastsnap = nil
+
+      @options = options
 
       begin
         lsnp = @destination.get(@zfsproperties[:lastsnap])
@@ -182,8 +199,8 @@ module ZettaBee
         raise unless e.message.include?("dataset does not exist")
       end
 
-      @log.add Log4r::StdoutOutputter.new('console', :formatter => Log4r::PatternFormatter.new(:pattern => "[%d] zettabee:%c [%p] %l %m"), :level => Log4r::DEBUG) if Set.verbose
-      Set.debug ? log4level = Log4r::DEBUG : log4level = Log4r::INFO
+      @log.add Log4r::StdoutOutputter.new('console', :formatter => Log4r::PatternFormatter.new(:pattern => "[%d] zettabee:%c [%p] %l %m"), :level => Log4r::DEBUG) if @options[:verbose]
+      @options[:debug] ? log4level = Log4r::DEBUG : log4level = Log4r::INFO
       @log.add Log4r::FileOutputter.new("logfile", :filename => @logfile, :trunc => false, :formatter => Log4r::PatternFormatter.new(:pattern => "[%d] #{ZFIX}:%c [%p] %l %m"), :level => log4level)
       @nagios_svc_description = "service/#{ZFIX}:#{@fingerprint}"
 
@@ -217,7 +234,7 @@ module ZettaBee
       end
       rh,rm,rs = runtime(:hms)
       @destination.exists? ? lss = lastsnapshot : lss = '-'
-      if Set.fullstatus then
+      if @options[:fullstatus] then
         print Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d%s  %s:%d  %s (%d:%02d:%02d)\n",@source.host.ljust(8),@source.name.ljust(45),@destination.host.rjust(8),@destination.name.ljust(36),state.ljust(14),h,m,s,lbang,lss.rjust(26),@port,status,rh,rm,rs)
       else
         print Kernel.sprintf("%s:%s  %s:%s  %s  %3d:%02d:%02d%s  %s (%d:%02d:%02d)\n",@source.host.ljust(8),@source.name.ljust(45),@destination.host.rjust(8),@destination.name.ljust(36),state.ljust(14),h,m,s,lbang,status,rh,rm,rs)
@@ -231,7 +248,7 @@ module ZettaBee
     def output_logfile
       puts @logfile
     end
-    
+
     def lock
       begin
         FileUtils.mkdir(@lckfile)
@@ -256,7 +273,7 @@ module ZettaBee
         end
       end
     end
-    
+
     def lastsnapshot
       l = @destination.get(@zfsproperties[:lastsnap])
       l.nil? ? '-' : l
@@ -267,8 +284,8 @@ module ZettaBee
       seconds = 0
       if is_synchronized? then
         lastsnapshot_creation = @destination_lastsnap.get(:creation)
-        dt_delta = DateTime.now - DateTime.parse(lastsnapshot_creation)
-        h,m,s,f = DateTime.day_fraction_to_time(dt_delta)
+        dt_delta = ((DateTime.now.to_time - DateTime.parse(lastsnapshot_creation).to_time).abs).round
+        h,m,s = dt_delta / 60 / 60, ( dt_delta / 60 ) % 60, dt_delta % 60
         seconds = h * 60 * 60 + m * 60 + s
       end
       if mode.nil? then
@@ -284,8 +301,8 @@ module ZettaBee
       h,m,s = 0,0,0
       seconds = 0
       if is_running? then
-        dt_delta = DateTime.now - DateTime.parse(File.ctime(@zmqsock).to_s)
-        h,m,s,f = DateTime.day_fraction_to_time(dt_delta)
+        dt_delta = ((DateTime.now.to_time - DateTime.parse(File.ctime(@zmqsock).to_s).to_time).abs).round
+        h,m,s = dt_delta / 60 / 60, ( dt_delta / 60 ) % 60, dt_delta % 60
         seconds = h * 60 * 60 + m * 60 + s
       end
       if mode.nil? then
@@ -440,46 +457,70 @@ module ZettaBee
         when :initialize then
           raise StateError, "cannot initialize a synchronized pair" if is_synchronized?
           zfssend_opts = ""
-          zfsrecv_opts = "-o #{@zfsproperties[:source]}='#{@source.host}:#{@source.name}' -o #{@zfsproperties[:destination]}='#{@destination.host}:#{@destination.name}'"
+          zfsrecv_opts = "-F"
+          zfsrecv_opts += " -o readonly=on -o #{@zfsproperties[:source]}=#{@source.host}:#{@source.name} -o #{@zfsproperties[:destination]}=#{@destination.host}:#{@destination.name}" if @destination.zpool_version >= 31
         when :update then
           raise StateError, "must initialize a pair before updating" unless is_synchronized?
-          snapshots = @destination.list_snapshots
           zfssend_opts = "-i #{@source_lastsnap.snapshot_name}"
+          zfsrecv_opts = "-F"
+          zfsrecv_opts += " -o readonly=on" if @destination.zpool_version >= 31
         else
           raise Error, "invalid mode #{mode}"
       end
-      @log.debug " mode: #{mode.to_s}; zfs send options: '#{zfssend_opts}'; zfs recv options: '#{zfsrecv_opts}'"
+      @log.debug " mode: #{mode.to_s};"
+      @log.debug "   zfs send options: #{zfssend_opts}"
+      @log.debug "   zfs recv options: #{zfsrecv_opts}"
 
       Net::SSH.start(@source.host,'root',:port => @sshport,:keys => [ @sshkey ]) do |session|
 
-        if mode == :initialize then
+        @source.session = session
+
+        STDOUT.sync = true
+
+        raise ZettabeeError, "destination zpool version must be greater or equal to source zpool version" unless @destination.zpool_version >= @source.zpool_version
+
+        if mode == :initialize
           @source.set(@zfsproperties[:source],"#{@source.host}:#{@source.name}",session) if mode == :initialize
           @source.set(@zfsproperties[:destination],"#{@destination.host}:#{@destination.name}",session) if mode == :initialize
-          zfsrecv_opts += " -o quota=#{@source.get('quota',session)} -o reservation=#{@source.get('reservation',session)} -o compression=#{@source.get('compression',session)}"
+          zfsrecv_opts += " -o quota=#{@source.get('quota',session)}" if @destination.zpool_version >= 31
         end
 
         nextsnapshot.snapshot(session)
 
-        zfsrecv_cmd = "mbuffer -s 128k -m 500M -q -I #{@port} -l /tmp/zettabee.#{@fingerprint}.mbuffer.log 2>/tmp/zettabee.#{@fingerprint}.mbuffer.err | zfs receive -o readonly=on #{zfsrecv_opts} #{@destination.name} 2>/tmp/zettabee.#{@fingerprint}.zfsrecv.err"
+        mbuffer_send_log = "/tmp/#{@fingerprint}.mbuffer.log"
+        zfs_send_err = "/tmp/#{@source_lastsnap.snapshot_name}.zfssend.err"
+        FileUtils.mkdir_p("#{@tmpdir}/#{@fingerprint}")
+        mbuffer_recv_log = "#{@tmpdir}/#{@fingerprint}/mbuffer.log"
+        mbuffer_recv_err = "#{@tmpdir}/#{@fingerprint}/mbuffer.err"
+
+
+        zfsrecv_cmd = "mbuffer -s 128k -m 500M -q -I #{@port} -l #{mbuffer_recv_log} 2>#{mbuffer_recv_err} | zfs receive #{zfsrecv_opts} #{@destination.name}"
         pid, stdin, stdout, stderr = popen4(zfsrecv_cmd)
         @log.debug "  #{zfsrecv_cmd}' [pid #{pid}]"
 
         zettabeem_cmd = "#{File.expand_path(File.dirname(__FILE__))}/../bin/__zettabeem #{statuszocket}"
         mpid, mstdin, mstdout, mstderr = popen4(zettabeem_cmd)
+        mstdin.close
         @log.debug "  launched '#{zettabeem_cmd}'"
 
         sleep(15) # this sleep is intended to let zfs recv get ready
 
         begin
-          nextsnapshot.send(:options => zfssend_opts,:session => session,:pipe => "mbuffer -s 128k -m 500M -R 50M -O #{@destination.host}:#{@port}",:zmqsocket => skt)
-        rescue ZFSError => e
-          raise ZFSError, stderr.read.strip
+         nextsnapshot.send(:options => zfssend_opts,:session => session,:pipe => "mbuffer -l #{mbuffer_send_log} -s 128k -m 500M -R 50M -O #{@destination.host}:#{@port} >/dev/null",:zfs_send_err => zfs_send_err, :zmqsocket => skt)
+        rescue ZFSError
+          raise ZFSError stderr.read.strip
         end
 
         ignored, status = Process::waitpid2 pid
 
         raise ZFSError, stderr.read.strip unless status.exitstatus == 0
 
+        unless @destination.zpool_version >= 31
+          @destination.set(:readonly,"on")
+          @destination.set(@zfsproperties[:source],"#{@source.host}:#{@source.name}")
+          @destination.set(@zfsproperties[:destination], "#{@destination.host}:#{@destination.name}")
+          @destination.set(:quota,@source.get('quota',session))
+        end
         @destination.set(@zfsproperties[:fingerprint],@fingerprint) if mode == :initialize
         @destination.set(@zfsproperties[:lastsnap],nextsnapshot.snapshot_name)
         @source.set(@zfsproperties[:lastsnap],nextsnapshot.snapshot_name,session)
@@ -495,10 +536,14 @@ module ZettaBee
         ctx.close
         mignored, mstatus = Process::waitpid2 mpid
         if mstatus.exitstatus == 0 then
+          # summary:  0.0 KiByte in  0.0 sec - average of  0.0 KiB/s
           @mbs = mstdout.read.strip.sub("summary: ","").sub("- average of","@")
         else
           @mbs = mstderr.read.strip
         end
+
+        session.exec("rm -f #{mbuffer_send_log} #{zfs_send_err}")
+        FileUtils.rm_f([mbuffer_recv_log,mbuffer_recv_err])
         @log.info "#{@source.host}:#{nextsnapshot.name} #{mode.to_s.upcase} #{@destination.host}:#{@destination.name} END"
       end
       unlock
