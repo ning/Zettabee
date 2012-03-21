@@ -125,7 +125,7 @@ module ZettaBee
             pair.execute(@action.to_sym)
             sn_svc_out += "#{pair.mbs}: OK"
           rescue Pair::IsRunningInfo
-            if @options.nagios then
+            if @options[:nagios] then
               if pair.state == Pair::STATE[:inconsistent] then # really need is_consistent? method
                 sn_rt = NAGIOS_CRITICAL
                 sn_svc_out += "state is #{Pair::STATE[:inconsistent]}"
@@ -142,7 +142,8 @@ module ZettaBee
               pair.execute(:status)
             end
           rescue => e
-            $stderr.write "#{ME}: error: #{@action.to_s.upcase} #{pair.destination}: #{e.message}\n"
+            ee = @options[:debug] ? "#{e.message}\n#{e.backtrace.join('\n')}" : e.message
+            $stderr.write "#{ME}: error: #{@action.to_s.upcase} #{pair.destination}: #{ee}\n"
             sn_rt = NAGIOS_UNKNOWN
             sn_svc_out += "#{e.message}"
           end
