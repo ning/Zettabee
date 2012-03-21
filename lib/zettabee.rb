@@ -40,15 +40,14 @@ module ZettaBee
         :verbose => false
       }
 
-
       begin
         options_cfg = YAML::load_file (options_cli[:config] || @options[:config])
         @options.merge! options_cfg unless options_cfg.nil? or options_cfg == false
-        @options.merge! options_cli
       rescue Errno::ENOENT
         raise ConfigurationError, "could not read main configuration file #{options_cli[:config]}" if options_cli[:config]
         @options[:config] = nil
       end
+      @options.merge! options_cli
 
       begin
         File.open(@options[:zonfig],"r").readlines.each do |zfgline|
@@ -73,12 +72,11 @@ module ZettaBee
           @pairs.push(pair)
         end
       rescue Errno::ENOENT => e
-        $stderr.write "error: #{e.message}\n"
-        exit 1
+        raise ConfigurationError, "error: #{e.message}\n"
       end
     end
 
-    def each &block
+    def each(&block)
       @pairs.each { |pair| block.call(pair) }
     end
 
@@ -456,12 +454,12 @@ module ZettaBee
       case mode
         when :initialize then
           raise StateError, "cannot initialize a synchronized pair" if is_synchronized?
-          zfssend_opts = ""
+          zfssend_opts = "-R"
           zfsrecv_opts = "-F"
           zfsrecv_opts += " -o readonly=on -o #{@zfsproperties[:source]}=#{@source.host}:#{@source.name} -o #{@zfsproperties[:destination]}=#{@destination.host}:#{@destination.name}" if @destination.zpool_version >= 31
         when :update then
           raise StateError, "must initialize a pair before updating" unless is_synchronized?
-          zfssend_opts = "-i #{@source_lastsnap.snapshot_name}"
+          zfssend_opts = "-R -I #{@source_lastsnap.snapshot_name}"
           zfsrecv_opts = "-F"
           zfsrecv_opts += " -o readonly=on" if @destination.zpool_version >= 31
         else
@@ -488,8 +486,7 @@ module ZettaBee
         nextsnapshot.snapshot(session)
 
         mbuffer_send_log = "/tmp/#{@fingerprint}.mbuffer.log"
-        zfs_send_err = "/tmp/#{@source_lastsnap.snapshot_name}.zfssend.err"
-        FileUtils.mkdir_p("#{@tmpdir}/#{@fingerprint}")
+        zfs_send_err = "/tmp/#{nextsnapshot.snapshot_name}.zfssend.err"
         mbuffer_recv_log = "#{@tmpdir}/#{@fingerprint}/mbuffer.log"
         mbuffer_recv_err = "#{@tmpdir}/#{@fingerprint}/mbuffer.err"
 
@@ -521,14 +518,14 @@ module ZettaBee
           @destination.set(@zfsproperties[:destination], "#{@destination.host}:#{@destination.name}")
           @destination.set(:quota,@source.get('quota',session))
         end
-        @destination.set(@zfsproperties[:fingerprint],@fingerprint) if mode == :initialize
+        @destination.set(@zfsproperties[:fingerprint],@fingerprint)
         @destination.set(@zfsproperties[:lastsnap],nextsnapshot.snapshot_name)
         @source.set(@zfsproperties[:lastsnap],nextsnapshot.snapshot_name,session)
 
         if mode == :update
           @source_lastsnap.destroy(session)
           @source_lastsnap = ZFS::Dataset.new("#{@source.name}@#{nextsnapshot.snapshot_name}",@source.host, :log => @log)
-          @destination_lastsnap.destroy
+          #@destination_lastsnap.destroy
           @destination_lastsnap = ZFS::Dataset.new("#{@destination.name}@#{nextsnapshot.snapshot_name}",@destination.host, :log => @log)
         end
 
